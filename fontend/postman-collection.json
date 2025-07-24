@@ -1,0 +1,35 @@
+{
+  "info": {
+    "_postman_id": "82326f3d-91a7-4d7b-a600-8bc5b0568635",
+    "name": "ad rec",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "45325982",
+    "_collection_link": "https://lively-star-542339.postman.co/workspace/My-Workspace~8982d8ba-1144-477f-8c18-867fd43865c5/collection/45325982-82326f3d-91a7-4d7b-a600-8bc5b0568635?action=share&source=collection_link&creator=45325982"
+  },
+  "item": [
+    {
+      "name": "prediction-run",
+      "request": {
+        "auth": {
+          "type": "noauth"
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://127.0.0.1:8000/api/prediction-run?hours_back=24",
+          "protocol": "http",
+          "host": ["127", "0", "0", "1"],
+          "port": "8000",
+          "path": ["api", "prediction-run"],
+          "query": [
+            {
+              "key": "hours_back",
+              "value": "24"
+            }
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}
