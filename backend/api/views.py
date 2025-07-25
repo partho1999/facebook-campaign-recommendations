@@ -11,6 +11,7 @@ from api.models import Campaign
 from api.utills.utills import load_model, preprocess, map_clusters_to_recommendations
 from django.conf import settings
 from threading import Lock
+import os
 from api.serializers import CampaignSerializer
 
 # Global state tracker for cycling state 0-7
@@ -25,7 +26,7 @@ class PredictCampaignsView(APIView):
             scaler, dbscan, features = load_model()
 
             # Extract parameters
-            api_key = request.GET.get('api_key', 'c1da605a864e6c74beb71d3a713e019c')
+            API_KEY = os.getenv('API_KEY')
             base_url = request.GET.get('base_url', 'https://tracktheweb.online')
             hours_back = int(request.GET.get('hours_back', 24))
 
@@ -59,7 +60,7 @@ class PredictCampaignsView(APIView):
                 }
 
                 headers = {
-                    "Api-Key": api_key,
+                    "Api-Key": API_KEY,
                     "Content-Type": "application/json"
                 }
 
@@ -186,85 +187,89 @@ class PredictCampaignsView(APIView):
 
 
 
+
 class PredictionsView(APIView):
     def get(self, request):
-        # 1. Filter campaigns from the last 24 hours
-        now = timezone.now()
-        last_24_hours = now - timedelta(hours=24)
-        campaigns = campaigns = Campaign.objects.filter(timestamp__gte=last_24_hours).distinct()
-        serializer = CampaignSerializer(campaigns, many=True)
+        try:
+            now = timezone.now()
+            last_24_hours = now - timedelta(hours=24)
 
-        # 2. Flatten JSON: campaign + metrics
-        flat_data_list = []
-        for campaign_data in serializer.data:
-            flat_data = {
-                **{k: v for k, v in campaign_data.items() if k != 'metrics'},
-                **campaign_data.get('metrics', {})
-            }
-            flat_data_list.append(flat_data)
-        df = pd.DataFrame(flat_data_list)
+            grouped_dfs = []
+            for i in range(8):
+                start_time = last_24_hours + timedelta(hours=3 * i)
+                end_time = start_time + timedelta(hours=3)
 
-        if df.empty:
+                campaigns = Campaign.objects.filter(
+                    timestamp__gte=start_time,
+                    timestamp__lt=end_time
+                )
+                serializer = CampaignSerializer(campaigns, many=True)
+                flat_data = []
+                for item in serializer.data:
+                    metrics = item.get('metrics', {})
+                    flat_data.append({
+                        'campaign_id': item['campaign_id'],
+                        'campaign_name': item.get('campaign_name', ''),
+                        'cost': float(metrics.get('cost', 0.0)),
+                        'revenue': float(metrics.get('revenue', 0.0)),
+                        'clicks': int(metrics.get('clicks', 0)),
+                        'conversions': int(metrics.get('conversions', 0)),
+                    })
+
+                df = pd.DataFrame(flat_data)
+
+                if not df.empty:
+                    df = df.drop_duplicates(subset=['campaign_id', 'campaign_name'])
+                    grouped = df.groupby(['campaign_id', 'campaign_name'], as_index=False).agg({
+                        'cost': 'sum',
+                        'revenue': 'sum',
+                        'clicks': 'sum',
+                        'conversions': 'sum',
+                    })
+                    grouped_dfs.append(grouped)
+
+            non_empty_dfs = [df for df in grouped_dfs if not df.empty]
+
+            if not non_empty_dfs:
+                return Response({
+                    'success': True,
+                    'recommendations': []
+                }, status=status.HTTP_200_OK)
+
+            total_24h_df = pd.concat(non_empty_dfs)
+            total_24h_df = total_24h_df.groupby(['campaign_id', 'campaign_name'], as_index=False).sum()
+
+            total_24h_df['profit'] = total_24h_df['revenue'] - total_24h_df['cost']
+            total_24h_df['roi'] = total_24h_df.apply(lambda r: (r['revenue'] / r['cost']) if r['cost'] > 0 else 0.0, axis=1)
+            total_24h_df['conversion_rate'] = total_24h_df.apply(lambda r: (r['conversions'] / r['clicks']) if r['clicks'] > 0 else 0.0, axis=1)
+            total_24h_df['cpc'] = total_24h_df.apply(lambda r: (r['cost'] / r['clicks']) if r['clicks'] > 0 else 0.0, axis=1)
+            total_24h_df['profit_margin'] = total_24h_df.apply(lambda r: (r['profit'] / r['revenue']) if r['revenue'] > 0 else 0.0, axis=1)
+
+            scaler, dbscan, features = load_model()
+
+            processed_df = preprocess(total_24h_df.copy(), features)
+            X = scaler.transform(processed_df[features])
+
+            cluster_labels = dbscan.fit_predict(X)
+
+            # **Important**: map clusters to recommendations exactly like before
+            recommendations = map_clusters_to_recommendations(processed_df, cluster_labels)
+
+            total_24h_df['recommendation'] = recommendations
+
+            result = total_24h_df.to_dict(orient='records')
+
             return Response({
-                "success": False,
-                "message": "No campaign data found in the last 24 hours."
-            })
+                'success': True,
+                'recommendations': result
+            }, status=status.HTTP_200_OK)
 
-        # 3. Create 8 DataFrames by state and drop duplicate campaign_id in each
-        grouped_dfs = []
-        df['state'] = pd.to_numeric(df.get('state', -1), errors='coerce').fillna(-1).astype(int)
-        for i in range(8):
-            state_df = df[df['state'] == i].copy()
-            state_df = state_df.drop_duplicates(subset='campaign_id', keep='last').reset_index(drop=True)
-            grouped_dfs.append(state_df)
-
-        # 4. Combine all 8 DataFrames
-        combined_df = pd.concat(grouped_dfs, ignore_index=True)
-
-        # 5. Ensure numeric metric fields
-        metric_fields = [
-            'cost', 'revenue', 'profit', 'clicks', 'conversions',
-            'conversion_rate', 'roi', 'cpc', 'profit_margin'
-        ]
-        for field in metric_fields:
-            combined_df[field] = pd.to_numeric(combined_df.get(field, 0), errors='coerce').fillna(0)
-
-        # 6. Average metrics per campaign
-        avg_df = combined_df.groupby(['campaign_id', 'campaign_name'], as_index=False)[metric_fields].mean()
-
-        if avg_df.empty:
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
             return Response({
-                "success": False,
-                "message": "No campaign data with valid metrics."
-            })
+                'success': False,
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        # 7. Run recommendation model
-        scaler, dbscan, features = load_model()
-        processed_df = preprocess(avg_df.copy(), features)
-        X = processed_df[features].copy()
-        X = scaler.transform(X)
-        cluster_labels = dbscan.fit_predict(X)
-        recommendations = map_clusters_to_recommendations(processed_df, cluster_labels)
 
-        # 8. Final response with all fields
-        output = []
-        for row, rec in zip(avg_df.to_dict(orient="records"), recommendations):
-            output.append({
-                "campaign_id": row["campaign_id"],
-                "campaign": row["campaign_name"],
-                "recommendation": rec,
-                "cost": row["cost"],
-                "revenue": row["revenue"],
-                "profit": row["profit"],
-                "clicks": row["clicks"],
-                "conversions": row["conversions"],
-                "conversion_rate": row["conversion_rate"],
-                "roi": row["roi"],
-                "cpc": row["cpc"],
-                "profit_margin": row["profit_margin"]
-            })
-
-        return Response({
-            "success": True,
-            "recommendations": output
-        })
