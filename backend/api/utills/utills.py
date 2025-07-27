@@ -87,3 +87,5 @@ def map_clusters_to_recommendations(df, cluster_labels):
         return 'REVIEW'
 
     return [recommend(row).strip().upper() for _, row in df.iterrows()]
+
+
