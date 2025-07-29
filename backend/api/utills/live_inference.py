@@ -82,7 +82,6 @@ class DBSCANCampaignInference:
         return labels
     
     def generate_recommendations(self, df, labels):
-        # print("\n💡 Generating campaign recommendations...")
         df_result = df.copy()
         df_result['cluster'] = labels
 
@@ -92,61 +91,51 @@ class DBSCANCampaignInference:
             cost = row.get('cost', 0)
 
             if cost < 5:
-                return "KEEP_RUNNING", "Insufficient spend (<$5) - wait for more data"
+                return "KEEP_RUNNING", "Insufficient spend (<$5)", "Wait for more data before making changes"
 
-            # Handle noise/outliers (cluster -1)
+            # Outliers / noise
             if cluster == -1:
-                if roi > 1000:
-                    return "INCREASE_BUDGET", "Exceptional ROI (>1000%) - increase budget by 200%"
-                elif roi > 300:
-                    return "INCREASE_BUDGET", "Strong ROI (>300%) - increase budget by 100%"
-                elif roi > 100:
-                    return "INCREASE_BUDGET", "Good ROI (>100%) - increase budget by 50%"
-                elif roi > 0:
-                    return "INCREASE_BUDGET", "Positive ROI - increase budget moderately (20%)"
+                if roi > 0:
+                    increase_pct = min(200, roi / 5)
+                    return "INCREASE_BUDGET", f"Outlier ROI {roi:.1f}%", f"Increase budget by {increase_pct:.0f}%"
                 elif roi > -50:
-                    return "OPTIMIZE", "Outlier with slightly negative ROI - optimize campaign"
+                    return "OPTIMIZE", f"Outlier with slightly negative ROI {roi:.1f}%", "Optimize targeting and creatives"
                 else:
-                    return "PAUSE", "Outlier with poor performance - pause campaign"
+                    return "PAUSE", f"Outlier with poor ROI {roi:.1f}%", "Pause campaign immediately"
 
             # High performance clusters
             if cluster in [4, 5]:
-                if roi > 1000:
-                    return "INCREASE_BUDGET", "Exceptional ROI (>1000%) - increase budget by 200%"
-                elif roi > 300:
-                    return "INCREASE_BUDGET", "Strong ROI (>300%) - increase budget by 100%"
-                elif roi > 100:
-                    return "INCREASE_BUDGET", "Good ROI (>100%) - increase budget by 50%"
-                elif roi > 0:
-                    return "INCREASE_BUDGET", "Positive ROI - increase budget moderately (20%)"
+                if roi > 0:
+                    increase_pct = min(200, roi / 5)
+                    return "INCREASE_BUDGET", f"High ROI {roi:.1f}%", f"Increase budget by {increase_pct:.0f}%"
                 else:
-                    return "OPTIMIZE", "High performance cluster but no positive ROI - optimize campaign"
+                    return "OPTIMIZE", f"High performance cluster with no ROI {roi:.1f}%", "Improve ad quality or landing page"
 
             # Medium performance clusters
             if cluster in [0, 1]:
                 if roi > 0:
-                    return "OPTIMIZE", "Moderate ROI - optimize targeting and creatives"
-                elif roi > -50:
-                    return "REDUCE_BUDGET", "Slightly negative ROI - reduce budget slightly"
+                    return "OPTIMIZE", f"Moderate ROI {roi:.1f}%", "Test creatives and refine targeting"
                 else:
-                    return "REDUCE_BUDGET", "Negative ROI - reduce budget by 30-50%"
+                    decrease_pct = min(50, abs(roi) / 2)
+                    return "REDUCE_BUDGET", f"Negative ROI {roi:.1f}%", f"Reduce budget by {decrease_pct:.0f}%"
 
             # Poor performance clusters
             if cluster in [2, 3, 6]:
                 if cost > 100:
-                    return "PAUSE", "High spend with poor ROI - pause immediately"
+                    return "PAUSE", f"High spend (${cost:.0f}) with poor ROI {roi:.1f}%", "Pause immediately"
                 else:
-                    return "RESTRUCTURE", "Poor performance - restructure campaign completely"
+                    return "RESTRUCTURE", f"Low spend with poor ROI {roi:.1f}%", "Restructure campaign from scratch"
 
-            # Fallback for unknown clusters
-            return "REVIEW", "Unknown cluster - manual review required"
+            # Fallback
+            return "REVIEW", "Unknown cluster", "Manual review required"
 
-        # Apply recommendations
+        # Apply recommendation logic
         recommendations = df_result.apply(get_recommendation, axis=1)
         df_result['recommendation'] = [rec[0] for rec in recommendations]
         df_result['reason'] = [rec[1] for rec in recommendations]
+        df_result['suggestion'] = [rec[2] for rec in recommendations]
 
-        # Priority mapping
+        # Priority mapping for sorting
         priority_map = {
             'PAUSE': 1,
             'INCREASE_BUDGET': 2,
@@ -162,6 +151,7 @@ class DBSCANCampaignInference:
         df_result = df_result.sort_values(['priority', 'roi_confirmed'], ascending=[True, False])
 
         return df_result
+
 
 
 
