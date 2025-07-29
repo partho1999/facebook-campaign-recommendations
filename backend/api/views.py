@@ -7,7 +7,7 @@ import pandas as pd
 import numpy as np
 from django.utils import timezone
 from scipy.stats import linregress
-from api.models import Campaign, CampaignAd
+from api.models import Campaign, CampaignAdSet
 from api.utills.utills import load_model, preprocess, map_clusters_to_recommendations
 from django.conf import settings
 from threading import Lock
@@ -16,6 +16,9 @@ from api.utills.live_inference import main
 import json
 from collections import defaultdict
 from datetime import datetime
+from zoneinfo import ZoneInfo
+from dotenv import load_dotenv
+import os
 
 # Global state tracker for cycling state 0-7
 if not hasattr(settings, 'CAMPAIGN_STATE'):  # Only add if not present
@@ -25,203 +28,170 @@ if not hasattr(settings, 'CAMPAIGN_STATE'):  # Only add if not present
 class PredictCampaignsView(APIView):
     def get(self, request):
         try:
-            # Load model
-            scaler, dbscan, features = load_model()
-
-            # Extract parameters
-            api_key = 'c1da605a864e6c74beb71d3a713e019c'
+            # API config
+            api_key = os.getenv("API_KEY")
             base_url = "https://tracktheweb.online/admin_api/v1"
-            hours_back = int(request.GET.get('hours_back', 24))
-
-            time_ranges = [hours_back]
-            # final_output = []
             all_data_items = []
 
-            for time_range in time_ranges:
-                end_date = datetime.now()
-                start_date = end_date - timedelta(hours=time_range)
+            # Use current Amsterdam time for both start and end date
+            now_amsterdam = datetime.now(ZoneInfo("Europe/Amsterdam"))
+            start_date = now_amsterdam
+            end_date = now_amsterdam
 
-                payload = {
-                    "range": {
-                        "from": start_date.strftime("%Y-%m-%d"),
-                        "to": end_date.strftime("%Y-%m-%d"),
-                        "timezone": "Europe/Amsterdam"
-                    },
-                    "columns":  [
-                        "campaign", "campaign_id", "cost", "revenue", "profit",
-                        "clicks", "campaign_unique_clicks", "conversions", "roi_confirmed",
-                        "datetime", "lp_clicks", "cr", "lp_ctr"
-                    ],
-                    "metrics": [
-                        "clicks",
-                        "cost",
-                        "campaign_unique_clicks",
-                        "conversions",
-                        "roi_confirmed"
-                    ],
-                    "grouping": [
-                        "sub_id_6",
-                        "sub_id_5",
-                        "sub_id_3",
-                        "sub_id_2"
-                    ],
-                    "filters": [],
-                    "summary": False,
-                    "limit": 100000,
-                    "offset": 0,
-                    "extended": True
+            payload = {
+                "range": {
+                    "from": start_date.strftime("%Y-%m-%d"),
+                    "to": end_date.strftime("%Y-%m-%d"),
+                    "timezone": "Europe/Amsterdam"
+                },
+                "columns": ["clicks", "day", "lp_clicks", "lp_ctr", "cr"],
+                "metrics": [
+                    "clicks", "cost", "campaign_unique_clicks", "conversions",
+                    "roi_confirmed", "revenue", "profit"
+                ],
+                "grouping": ["sub_id_6", "sub_id_5", "sub_id_2", "sub_id_3"],
+                "filters": [],
+                "summary": False,
+                "limit": 100000,
+                "offset": 0,
+                "extended": True
+            }
+
+            headers = {
+                "Api-Key": api_key,
+                "Content-Type": "application/json"
+            }
+
+            response = requests.post(
+                f"{base_url}/report/build",
+                headers=headers,
+                json=payload,
+                timeout=30
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            # Save raw API response
+            with open('api_response.json', 'w') as f:
+                json.dump(data, f, indent=4)
+
+            rows = data.get('rows', [])
+            if not rows:
+                return Response({'success': True, 'data': [], 'summary': {}}, status=status.HTTP_200_OK)
+
+            df = pd.DataFrame(rows)
+
+            df.to_csv("media/row_data.csv", index=False)
+
+            def is_empty_or_placeholder(val):
+                if pd.isna(val):
+                    return True
+                if isinstance(val, str) and (val.strip() == "" or val.strip().startswith("{{")):
+                    return True
+                return False
+
+            df = df.applymap(lambda x: pd.NA if is_empty_or_placeholder(x) else x)
+
+            for col in ['sub_id_2', 'sub_id_3']:
+                if col in df.columns and df[col].isna().all():
+                    df.drop(columns=col, inplace=True)
+
+            cols_to_check = ['sub_id_6', 'sub_id_5', 'sub_id_3', 'sub_id_2']
+            cols_existing = [col for col in cols_to_check if col in df.columns]
+            df = df.dropna(subset=cols_existing, how='all')
+
+
+            # df['datetime'] = pd.to_datetime(df['datetime'])
+
+            # df = df.sort_values(by=['sub_id_2' if 'sub_id_2' in df.columns else 'campaign_id', 'datetime'])
+
+            if 'sub_id_2' in df.columns:
+                # df = df.sort_values(by='datetime', ascending=False)
+                df = df.drop_duplicates(subset='sub_id_2', keep='first')
+
+            df.to_csv("media/row_data.csv", index=False)
+            df.to_json("media/preprocess_data.json", orient='records', indent=2)
+
+            data = main()
+
+            for item in data:
+                try:
+                    fb_adset_id = item.get('sub_id_2')
+                    if fb_adset_id is None or not str(fb_adset_id).isdigit():
+                        continue
+
+                    CampaignAdSet.objects.create(
+                        sub_id_6=item.get('sub_id_6', ''),
+                        sub_id_5=item.get('sub_id_5', ''),
+                        sub_id_2=str(item.get('sub_id_2', '')),
+                        sub_id_3=str(item.get('sub_id_3', '')),
+                        day=item.get('day', datetime.today().date()),
+
+                        clicks=item.get('clicks', 0),
+                        lp_clicks=item.get('lp_clicks', 0),
+                        lp_ctr=item.get('lp_ctr', 0.0),
+                        cr=item.get('cr', 0.0),
+
+                        cost=item.get('cost', 0.0),
+                        campaign_unique_clicks=item.get('campaign_unique_clicks', 0),
+                        conversions=item.get('conversions', 0),
+                        roi_confirmed=item.get('roi_confirmed', 0.0),
+                        revenue=item.get('revenue', 0.0),
+                        profit=item.get('profit', 0.0),
+                        revenue_to_cost_ratio=item.get('revenue_to_cost_ratio', 0.0),
+                        conversion_rate=item.get('conversion_rate', 0.0),
+                        profit_margin=item.get('profit_margin', 0.0),
+                        cluster=item.get('cluster', -1),
+
+                        recommendation=item.get('recommendation', ''),
+                        reason=item.get('reason', ''),
+                        priority=item.get('priority', 0),
+                        urgent=item.get('urgent', False),
+                        action_needed=item.get('action_needed', False),
+                        potential_impact=item.get('potential_impact', 0.0)
+                    )
+
+                except Exception as e:
+                    print(f"[ERROR] Creating campaign performance entry failed: {e}")
+
+            all_data_items.extend(data)
+            grouped = defaultdict(list)
+
+            for item in data:
+                key = (item['sub_id_6'], item['sub_id_3'])
+                grouped[key].append(item)
+
+            output = []
+            for (sub_id_6, sub_id_3), items in grouped.items():
+                output.append({
+                    "sub_id_6": sub_id_6,
+                    "sub_id_3": sub_id_3,
+                    "adset": items
+                })
+
+            summary_data = pd.DataFrame(all_data_items)
+            if not summary_data.empty:
+                total_cost = summary_data['cost'].sum()
+                total_revenue = summary_data['revenue'].sum()
+                total_profit = summary_data['profit'].sum()
+                total_clicks = summary_data['clicks'].sum()
+                total_conversions = summary_data['conversions'].sum()
+                avg_roi = summary_data['roi_confirmed'].mean()
+                avg_cr = summary_data['conversion_rate'].mean()
+                priority_dist = summary_data['priority'].astype(str).value_counts().to_dict()
+
+                summary = {
+                    "total_cost": round(total_cost, 2),
+                    "total_revenue": round(total_revenue, 2),
+                    "total_profit": round(total_profit, 2),
+                    "total_clicks": int(total_clicks),
+                    "total_conversions": int(total_conversions),
+                    "average_roi": round(avg_roi, 4),
+                    "average_conversion_rate": round(avg_cr, 4),
+                    "priority_distribution": priority_dist
                 }
-
-                headers = {
-                    "Api-Key": api_key,
-                    "Content-Type": "application/json"
-                }
-
-                response = requests.post(
-                    f"{base_url}/report/build",
-                    headers=headers,
-                    json=payload,
-                    timeout=30
-                )
-                response.raise_for_status()
-                data = response.json()
-                # print(data)
-
-                with open('api_response.json', 'w') as f:
-                    json.dump(data, f, indent=4)  
-
-                rows = data.get('rows', [])
-                # print("rows:", rows)
-                
-
-                if not rows:
-                    continue
-
-                # # Print unique campaign_id values and their count
-                # unique_campaign_ids = set(row.get('campaign_id') for row in rows if 'campaign_id' in row)
-                # print(f"Number of unique campaign_id: {len(unique_campaign_ids)}")
-                # print(f"Unique campaign_id values: {unique_campaign_ids}")
-
-                df = pd.DataFrame(rows)
-
-                # Function to detect empty strings or placeholders like {{campaign.name}}
-                def is_empty_or_placeholder(val):
-                    if pd.isna(val):
-                        return True
-                    if isinstance(val, str) and (val.strip() == "" or val.strip().startswith("{{")):
-                        return True
-                    return False
-
-                # Replace those with pd.NA
-                df = df.applymap(lambda x: pd.NA if is_empty_or_placeholder(x) else x)
-
-                # Drop sub_id_2 and sub_id_3 if all values are NA
-                for col in ['sub_id_2', 'sub_id_3']:
-                    if col in df.columns and df[col].isna().all():
-                        df.drop(columns=col, inplace=True)
-
-                # Drop rows where all of sub_id_6, sub_id_5, sub_id_3, sub_id_2 are empty
-                cols_to_check = ['sub_id_6', 'sub_id_5', 'sub_id_3', 'sub_id_2']
-                cols_existing = [col for col in cols_to_check if col in df.columns]
-                df = df.dropna(subset=cols_existing, how='all')
-
-                # Convert the 'datetime' column to datetime
-                df['datetime'] = pd.to_datetime(df['datetime'])
-
-                # Sort the DataFrame
-                df = df.sort_values(by=['sub_id_2' if 'sub_id_2' in df.columns else 'campaign_id', 'datetime'])
-
-                if 'sub_id_2' in df.columns:
-                    df = df.sort_values(by='datetime', ascending=False)  # latest datetime first
-                    df = df.drop_duplicates(subset='sub_id_2', keep='first')
-
-                # Save to CSV
-                df.to_csv("media/row_data.csv", index=False)
-                df.to_json("media/preprocess_data.json", orient='records', indent=2)
-
-                data = main()
-
-                for item in data:
-                    try:
-                        fb_adset_id = item.get('sub_id_2')
-                        if fb_adset_id is None or not str(fb_adset_id).isdigit():
-                            continue  # skip invalid adsets
-
-                        fb_adset_id = int(fb_adset_id)
-                        timestamp_ms = item.get('datetime')
-                        timestamp = datetime.fromtimestamp(timestamp_ms / 1000.0)
-
-                        CampaignAd.objects.create(
-                            fb_campaign_id=item.get('campaign_id', 0),
-                            fb_adset_id=fb_adset_id,
-                            fb_campaign_name=item.get('campaign', ''),
-                            cost=item.get('cost', 0.0),
-                            revenue=item.get('revenue', 0.0),
-                            profit=item.get('profit', 0.0),
-                            clicks=item.get('clicks', 0),
-                            campaign_unique_clicks=item.get('campaign_unique_clicks', 0),
-                            conversions=item.get('conversions', 0),
-                            roi_confirmed=item.get('roi_confirmed', 0.0),
-                            timestamp=timestamp,
-                            lp_clicks=item.get('lp_clicks', 0),
-                            cr=item.get('cr', 0.0),
-                            lp_ctr=item.get('lp_ctr', 0.0),
-                            sub_id_2=str(item.get('sub_id_2', '')),
-                            sub_id_3=str(item.get('sub_id_3', '')),
-                            sub_id_5=str(item.get('sub_id_5', '')),
-                            sub_id_6=str(item.get('sub_id_6', '')),
-                            log_revenue=item.get('revenue_to_cost_ratio', 0.0),  # remapped
-                            log_cr=item.get('conversion_rate', 0.0),              # remapped
-                            cluster=item.get('cluster', -1),
-                            recommendation=item.get('recommendation', ''),
-                            reason=item.get('reason', ''),
-                            urgency=item.get('urgency', ''),
-                            priority=str(item.get('priority', ''))
-                        )
-
-                    except Exception as e:
-                        print(f"[ERROR] Creating campaign ad failed: {e}")
-
-                all_data_items.extend(data)
-                grouped = defaultdict(list)
-
-                for item in data:
-                    key = (item['sub_id_6'], item['sub_id_3'])
-                    grouped[key].append(item)
-
-                # Convert to desired output format
-                output = []
-                for (sub_id_6, sub_id_3), items in grouped.items():
-                    output.append({
-                        "sub_id_6": sub_id_6,
-                        "sub_id_3": sub_id_3,
-                        "adset": items
-                    })
-
-                # Calculate summary
-                summary_data = pd.DataFrame(all_data_items)
-                if not summary_data.empty:
-                    total_cost = summary_data['cost'].sum()
-                    total_revenue = summary_data['revenue'].sum()
-                    total_profit = summary_data['profit'].sum()
-                    total_clicks = summary_data['clicks'].sum()
-                    total_conversions = summary_data['conversions'].sum()
-                    avg_roi = summary_data['roi_confirmed'].mean()
-                    avg_cr = summary_data['conversion_rate'].mean()
-                    priority_dist = summary_data['priority'].astype(str).value_counts().to_dict()
-
-                    summary = {
-                        "total_cost": round(total_cost, 2),
-                        "total_revenue": round(total_revenue, 2),
-                        "total_profit": round(total_profit, 2),
-                        "total_clicks": int(total_clicks),
-                        "total_conversions": int(total_conversions),
-                        "average_roi": round(avg_roi, 4),
-                        "average_conversion_rate": round(avg_cr, 4),
-                        "priority_distribution": priority_dist
-                    }
-                else:
-                    summary = {}
+            else:
+                summary = {}
 
             return Response({'success': True, 'data': output, 'summary': summary}, status=status.HTTP_200_OK)
 

@@ -1,29 +1,19 @@
-# Use official Python image (slim)
+# Use official Python base image
 FROM python:3.12-slim
 
-# Prevent Python from writing .pyc files and buffering stdout/stderr
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
-
-# Set working directory inside container
+# Set working directory
 WORKDIR /app
 
-# Install system dependencies (if needed)
-RUN apt-get update && apt-get install -y \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
+# Install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy requirements file and install dependencies
-COPY requirements.txt /app/
-RUN pip install --upgrade pip
-RUN pip install -r requirements.txt
+# Copy project files
+COPY . .
 
-# Copy project files into the container
-COPY . /app/
+# Collect static files (optional, useful in prod)
+RUN python manage.py collectstatic --noinput
 
-# Expose port 8000 for Django server
-EXPOSE 8000
-
-# Default command to run Django development server
+# Run Django app
 CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
 
