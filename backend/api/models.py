@@ -88,6 +88,7 @@ class CampaignAdSet(models.Model):
 
     recommendation = models.TextField(blank=True, null=True)
     reason = models.TextField(blank=True, null=True)
+    suggestion = models.TextField(blank=True, null=True)
     priority = models.IntegerField(default=0)
     urgent = models.BooleanField(default=False)
     action_needed = models.BooleanField(default=False)

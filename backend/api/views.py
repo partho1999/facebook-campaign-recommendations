@@ -145,6 +145,7 @@ class PredictCampaignsView(APIView):
 
                         recommendation=item.get('recommendation', ''),
                         reason=item.get('reason', ''),
+                        suggestion=item.get('suggestion', ''),
                         priority=item.get('priority', 0),
                         urgent=item.get('urgent', False),
                         action_needed=item.get('action_needed', False),
