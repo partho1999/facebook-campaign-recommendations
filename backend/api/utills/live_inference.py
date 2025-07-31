@@ -37,7 +37,7 @@ class DBSCANCampaignInference:
     def preprocess_data(self, df):
         # print("\n🔧 Preprocessing data for inference...")
         numeric_cols = ['cost', 'revenue', 'profit', 'clicks', 'campaign_unique_clicks', 
-                        'conversions', 'roi_confirmed', 'lp_clicks', 'cr', 'lp_ctr']
+                        'conversions', 'roi_confirmed', 'lp_clicks', 'cr', 'lp_ctr', 'cpc']
         for col in numeric_cols:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
