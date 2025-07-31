@@ -226,7 +226,7 @@ class DBSCANCampaignInference:
             return None, None
 
 
-def main():
+def main(data_path):
     """Main function to run inference"""
     model_path = os.path.join(settings.MEDIA_ROOT, 'dbscan_model_bundle_latest.pkl')
     if not os.path.exists(model_path):
@@ -234,7 +234,7 @@ def main():
         # print("Please run the DBSCAN trainer first to generate the model.")
         return
 
-    data_path =os.path.join(settings.MEDIA_ROOT, 'preprocess_data.json')
+    
     if not os.path.exists(data_path):
         # print(f"❌ Data file not found: {data_path}")
         # print("Please run the downloader script first to generate the data.")

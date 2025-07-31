@@ -98,3 +98,43 @@ class CampaignAdSet(models.Model):
 
     def __str__(self):
         return f"AdSet {self.sub_id_2} | Day: {self.day}"
+    
+
+class AdSetTimeRange(models.Model):
+    sub_id_6 = models.CharField(max_length=255, blank=True, null=True)
+    sub_id_5 = models.CharField(max_length=255, blank=True, null=True)
+    sub_id_2 = models.CharField(max_length=255, blank=True, null=True)
+    sub_id_3 = models.CharField(max_length=255, blank=True, null=True)
+    day = models.DateField(blank=True, null=True)
+
+    clicks = models.IntegerField(default=0)
+    lp_clicks = models.IntegerField(default=0)
+    lp_ctr = models.FloatField(default=0.0)
+    cr = models.FloatField(default=0.0)
+
+    cost = models.FloatField(default=0.0)
+    campaign_unique_clicks = models.IntegerField(default=0)
+    conversions = models.IntegerField(default=0)
+    roi_confirmed = models.FloatField(default=0.0)
+    revenue = models.FloatField(default=0.0)
+    profit = models.FloatField(default=0.0)
+    revenue_to_cost_ratio = models.FloatField(default=0.0)
+    conversion_rate = models.FloatField(default=0.0)
+    profit_margin = models.FloatField(default=0.0)
+    cluster = models.IntegerField(default=-1)
+
+    recommendation = models.TextField(blank=True, null=True)
+    reason = models.TextField(blank=True, null=True)
+    suggestion = models.TextField(blank=True, null=True)
+    priority = models.IntegerField(default=0)
+    urgent = models.BooleanField(default=False)
+    action_needed = models.BooleanField(default=False)
+    potential_impact = models.FloatField(default=0.0)
+
+    start_date = models.DateField(blank=True, null=True)
+    end_date = models.DateField(blank=True, null=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"AdSet {self.sub_id_2} | Day: {self.day}"
