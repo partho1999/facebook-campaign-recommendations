@@ -20,11 +20,22 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 import os
+import re
+from api.utills.country import extract_country_name
 
 # Global state tracker for cycling state 0-7
 if not hasattr(settings, 'CAMPAIGN_STATE'):  # Only add if not present
     settings.CAMPAIGN_STATE = 0
     settings.CAMPAIGN_STATE_LOCK = Lock()
+
+def extract_geo(sub_id_6):
+    if not isinstance(sub_id_6, str):
+        return None
+    # Pattern 1: URL-style
+    parts = re.split(r"\+-\+|\s-\s", sub_id_6)
+    if len(parts) >= 2:
+        return parts[1].strip()
+    return None
 
 class PredictCampaignsView(APIView):
     def get(self, request):
@@ -101,14 +112,11 @@ class PredictCampaignsView(APIView):
             cols_existing = [col for col in cols_to_check if col in df.columns]
             df = df.dropna(subset=cols_existing, how='all')
 
-
-            # df['datetime'] = pd.to_datetime(df['datetime'])
-
-            # df = df.sort_values(by=['sub_id_2' if 'sub_id_2' in df.columns else 'campaign_id', 'datetime'])
-
             if 'sub_id_2' in df.columns:
-                # df = df.sort_values(by='datetime', ascending=False)
                 df = df.drop_duplicates(subset='sub_id_2', keep='first')
+
+            df["geo"] = df["sub_id_6"].apply(extract_geo)
+            df["country"] = df["geo"].apply(extract_country_name)
 
             df.to_csv("media/row_data.csv", index=False)
             df.to_json("media/preprocess_data.json", orient='records', indent=2)
@@ -118,6 +126,7 @@ class PredictCampaignsView(APIView):
             data = main(data_path)
 
             for item in data:
+
                 try:
                     fb_adset_id = item.get('sub_id_2')
                     if fb_adset_id is None or not str(fb_adset_id).isdigit():
@@ -298,6 +307,9 @@ class PredictTimeRangeView(APIView):
             cols_to_check = ['sub_id_6', 'sub_id_5', 'sub_id_3', 'sub_id_2']
             cols_existing = [col for col in cols_to_check if col in df.columns]
             df = df.dropna(subset=cols_existing, how='all')
+
+            df["geo"] = df["sub_id_6"].apply(extract_geo)
+            df["country"] = df["geo"].apply(extract_country_name)
 
 
             df.to_csv("media/row_data_time_range.csv", index=False)
