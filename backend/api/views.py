@@ -45,7 +45,7 @@ class PredictCampaignsView(APIView):
                     "to": end_date.strftime("%Y-%m-%d"),
                     "timezone": "Europe/Amsterdam"
                 },
-                "columns": ["clicks", "day", "lp_clicks", "lp_ctr", "cr"],
+                "columns": ["clicks", "day", "lp_clicks", "lp_ctr", "cr", "cpc"],
                 "metrics": [
                     "clicks", "cost", "campaign_unique_clicks", "conversions",
                     "roi_confirmed", "revenue", "profit"
