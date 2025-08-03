@@ -107,20 +107,32 @@ class DBSCANCampaignInference:
         df_result['priority'] = df_result['recommendation'].map(priority_map).fillna(99)
         df_result = df_result.sort_values(['priority', 'roi_confirmed'], ascending=[True, False])
         return df_result
-    def add_cpc_level(self, df, cpc_col='cpc', geo_col='geo'):
-        # Normalize columns to lowercase for safety
+    def add_cpc_level(df, cpc_col='cpc', geo_col='geo'):
+    # Normalize column names to lowercase
         df.columns = [col.lower() for col in df.columns]
         cpc_col = cpc_col.lower()
         geo_col = geo_col.lower()
+
+        # Ensure required columns exist
         if cpc_col not in df.columns or geo_col not in df.columns:
             raise ValueError(f"Columns '{cpc_col}' and '{geo_col}' must be present in dataframe")
+
+        # Compute mean and std CPC per geo
         geo_stats = df.groupby(geo_col)[cpc_col].agg(['mean', 'std']).rename(columns={'mean': 'mean_cpc', 'std': 'std_cpc'})
+        
+        # Merge stats back to original dataframe
         df = df.merge(geo_stats, left_on=geo_col, right_index=True, how='left')
+
+        # Avoid division by zero
         df['std_cpc'] = df['std_cpc'].replace(0, 1e-6)
+
+        # Calculate z-score
         df['z_score'] = (df[cpc_col] - df['mean_cpc']) / df['std_cpc']
+
+        # Label based on z-score
         def label_cpc(z):
             if pd.isna(z):
-                return 'INSUFFICIENT_DATA'  # Optional: can also be 'STANDARD' or another label
+                return 'STANDARD'
             elif z < -1:
                 return 'LOW'
             elif z > 1:
@@ -129,7 +141,10 @@ class DBSCANCampaignInference:
                 return 'STANDARD'
 
         df['cpc_rate'] = df['z_score'].apply(label_cpc)
+
+        # Drop intermediate columns
         df.drop(columns=['mean_cpc', 'std_cpc', 'z_score'], inplace=True)
+
         return df
     def analyze_recommendations(self, df_result):
         rec_summary = df_result['recommendation'].value_counts()
