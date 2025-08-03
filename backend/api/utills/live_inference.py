@@ -120,13 +120,14 @@ class DBSCANCampaignInference:
         df['z_score'] = (df[cpc_col] - df['mean_cpc']) / df['std_cpc']
         def label_cpc(z):
             if pd.isna(z):
-                return 'OK'
+                return 'INSUFFICIENT_DATA'  # Optional: can also be 'STANDARD' or another label
             elif z < -1:
                 return 'LOW'
             elif z > 1:
                 return 'HIGH'
             else:
-                return 'OK'
+                return 'STANDARD'
+
         df['cpc_rate'] = df['z_score'].apply(label_cpc)
         df.drop(columns=['mean_cpc', 'std_cpc', 'z_score'], inplace=True)
         return df
