@@ -106,7 +106,7 @@ class DBSCANCampaignInference:
         df_result['recommendation'] = [rec[0] for rec in recommendations]
         df_result['reason'] = [rec[1] for rec in recommendations]
         df_result['suggestion'] = [rec[2] for rec in recommendations]
-        df_result['budget_change_pct'] = [rec[3] if rec[3] is not None else 0 for rec in recommendations]  # Default to 0
+        df_result['budget_change_pct'] = [round(rec[3]) if rec[3] is not None else 0 for rec in recommendations]  # Default to 0
 
         # Priority map and sorting
         priority_map = {
