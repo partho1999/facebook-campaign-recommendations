@@ -386,7 +386,7 @@ class PredictTimeRangeView(APIView):
                 summary_df = pd.DataFrame(all_data_items)
                 if not summary_df.empty:
                     summary = {
-                        "total adset" : len(summary_df),
+                        "total_adset" : len(summary_df),
                         "total_cost": round(summary_df['cost'].sum(), 2),
                         "total_revenue": round(summary_df['revenue'].sum(), 2),
                         "total_profit": round(summary_df['profit'].sum(), 2),
