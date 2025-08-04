@@ -22,6 +22,9 @@ from dotenv import load_dotenv
 import os
 import re
 from api.utills.country import extract_country_name
+import uuid
+
+unique_id = str(uuid.uuid4())
 
 # Global state tracker for cycling state 0-7
 if not hasattr(settings, 'CAMPAIGN_STATE'):  # Only add if not present
@@ -177,6 +180,7 @@ class PredictCampaignsView(APIView):
             output = []
             for (sub_id_6, sub_id_3), items in grouped.items():
                 output.append({
+                    "id": unique_id,
                     "sub_id_6": sub_id_6,
                     "sub_id_3": sub_id_3,
                     "adset": items
@@ -367,6 +371,7 @@ class PredictTimeRangeView(APIView):
             output = []
             for (sub_id_6, sub_id_3, day), items in grouped.items():
                 output.append({
+                    "id": unique_id,
                     "sub_id_6": sub_id_6,
                     "sub_id_3": sub_id_3,
                     "day": day,
