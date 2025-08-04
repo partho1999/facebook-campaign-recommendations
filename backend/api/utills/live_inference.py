@@ -57,43 +57,58 @@ class DBSCANCampaignInference:
             cluster = row['cluster']
             roi = row.get('roi_confirmed', 0)
             cost = row.get('cost', 0)
+            increase_pct = None  # Default value for budget change
+
             if cost < 5:
-                return "KEEP_RUNNING", "Insufficient spend (<$5)", "Wait for more data before making changes"
+                return "KEEP_RUNNING", "Insufficient spend (<$5)", "Wait for more data before making changes", None
+
             # Outliers / noise
             if cluster == -1:
                 if roi > 0:
                     increase_pct = min(200, roi / 5)
-                    return "INCREASE_BUDGET", f"Outlier ROI {roi:.1f}%", f"Increase budget by {increase_pct:.0f}%"
+                    return "INCREASE_BUDGET", f"Outlier ROI {roi:.1f}%", f"Increase budget by {increase_pct:.0f}%", increase_pct
                 elif roi > -50:
-                    return "OPTIMIZE", f"Outlier with slightly negative ROI {roi:.1f}%", "Optimize targeting and creatives"
+                    increase_pct = min(50, abs(roi) / 2)
+                    return "OPTIMIZE", f"Outlier with slightly negative ROI {roi:.1f}%", f"Decrease budget by {increase_pct:.0f}%", -increase_pct
                 else:
-                    return "PAUSE", f"Outlier with poor ROI {roi:.1f}%", "Pause campaign immediately"
+                    return "PAUSE", f"Outlier with poor ROI {roi:.1f}%", "Pause campaign immediately", None
+
             # High performance clusters
             if cluster in [4, 5]:
                 if roi > 0:
                     increase_pct = min(200, roi / 5)
-                    return "INCREASE_BUDGET", f"High ROI {roi:.1f}%", f"Increase budget by {increase_pct:.0f}%"
+                    return "INCREASE_BUDGET", f"High ROI {roi:.1f}%", f"Increase budget by {increase_pct:.0f}%", increase_pct
                 else:
-                    return "OPTIMIZE", f"High performance cluster with no ROI {roi:.1f}%", "Improve ad quality or landing page"
+                    return "OPTIMIZE", f"High performance cluster with no ROI {roi:.1f}%", "Improve ad quality or landing page", None
+
             # Medium performance clusters
             if cluster in [0, 1]:
                 if roi > 0:
-                    return "OPTIMIZE", f"Moderate ROI {roi:.1f}%", "Test creatives and refine targeting"
+                    return "OPTIMIZE", f"Moderate ROI {roi:.1f}%", "Test creatives and refine targeting", None
                 else:
-                    decrease_pct = min(50, abs(roi) / 2)
-                    return "REDUCE_BUDGET", f"Negative ROI {roi:.1f}%", f"Reduce budget by {decrease_pct:.0f}%"
+                    increase_pct = min(50, abs(roi) / 2)
+                    return "REDUCE_BUDGET", f"Negative ROI {roi:.1f}%", f"Reduce budget by {increase_pct:.0f}%", -increase_pct
+
             # Poor performance clusters
             if cluster in [2, 3, 6]:
                 if cost > 100:
-                    return "PAUSE", f"High spend (${cost:.0f}) with poor ROI {roi:.1f}%", "Pause immediately"
+                    return "PAUSE", f"High spend (${cost:.0f}) with poor ROI {roi:.1f}%", "Pause immediately", None
                 else:
-                    return "RESTRUCTURE", f"Low spend with poor ROI {roi:.1f}%", "Restructure campaign from scratch"
+                    return "RESTRUCTURE", f"Low spend with poor ROI {roi:.1f}%", "Restructure campaign from scratch", None
+
             # Fallback
-            return "REVIEW", "Unknown cluster", "Manual review required"
+            return "REVIEW", "Unknown cluster", "Manual review required", None
+
+        # Apply recommendations
         recommendations = df_result.apply(get_recommendation, axis=1)
+
+        # Unpack returned values into separate columns
         df_result['recommendation'] = [rec[0] for rec in recommendations]
         df_result['reason'] = [rec[1] for rec in recommendations]
         df_result['suggestion'] = [rec[2] for rec in recommendations]
+        df_result['budget_change_pct'] = [rec[3] if rec[3] is not None else 0 for rec in recommendations]  # Default to 0
+
+        # Priority map and sorting
         priority_map = {
             'PAUSE': 1,
             'INCREASE_BUDGET': 2,
@@ -104,9 +119,12 @@ class DBSCANCampaignInference:
             'MONITOR_CLOSELY': 7,
             'REVIEW': 8
         }
+
         df_result['priority'] = df_result['recommendation'].map(priority_map).fillna(99)
         df_result = df_result.sort_values(['priority', 'roi_confirmed'], ascending=[True, False])
+
         return df_result
+
     def add_cpc_level(self, df, cpc_col='cpc', geo_col='geo'):
         # Normalize columns to lowercase for safety
         df.columns = [col.lower() for col in df.columns]
