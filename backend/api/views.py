@@ -182,27 +182,21 @@ class PredictCampaignsView(APIView):
                     "adset": items
                 })
 
-            summary_data = pd.DataFrame(all_data_items)
-            if not summary_data.empty:
-                total_cost = summary_data['cost'].sum()
-                total_revenue = summary_data['revenue'].sum()
-                total_profit = summary_data['profit'].sum()
-                total_clicks = summary_data['clicks'].sum()
-                total_conversions = summary_data['conversions'].sum()
-                avg_roi = summary_data['roi_confirmed'].mean()
-                avg_cr = summary_data['conversion_rate'].mean()
-                priority_dist = summary_data['priority'].astype(str).value_counts().to_dict()
-
-                summary = {
-                    "total_cost": round(total_cost, 2),
-                    "total_revenue": round(total_revenue, 2),
-                    "total_profit": round(total_profit, 2),
-                    "total_clicks": int(total_clicks),
-                    "total_conversions": int(total_conversions),
-                    "average_roi": round(avg_roi, 4),
-                    "average_conversion_rate": round(avg_cr, 4),
-                    "priority_distribution": priority_dist
-                }
+            summary = {}
+            if all_data_items:
+                summary_df = pd.DataFrame(all_data_items)
+                if not summary_df.empty:
+                    summary = {
+                        "total_adset" : len(summary_df),
+                        "total_cost": round(summary_df['cost'].sum(), 2),
+                        "total_revenue": round(summary_df['revenue'].sum(), 2),
+                        "total_profit": round(summary_df['profit'].sum(), 2),
+                        "total_clicks": int(summary_df['clicks'].sum()),
+                        "total_conversions": int(summary_df['conversions'].sum()),
+                        "average_roi": round(summary_df['roi_confirmed'].mean(), 4),
+                        "average_conversion_rate": round(summary_df['conversion_rate'].mean(), 4),
+                        "priority_distribution": summary_df['priority'].astype(str).value_counts().to_dict()
+                    }
             else:
                 summary = {}
 
