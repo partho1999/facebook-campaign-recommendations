@@ -23,6 +23,7 @@ import os
 import re
 from api.utills.country import extract_country_name
 import uuid
+from api.utills.combine_inference import enrich_campaign_data
 
 
 
@@ -408,87 +409,146 @@ class PredictTimeRangeView(APIView):
             return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+class PredictCampaignsUpdateView(APIView):
+   def get(self, request):
+        try:
+            # API config
+            api_key = os.getenv("API_KEY")
+            base_url = "https://tracktheweb.online/admin_api/v1"
+            all_data_items = []
 
+            # Use current Amsterdam time for both start and end date
+            now_amsterdam = datetime.now(ZoneInfo("Europe/Amsterdam"))
+            start_date = now_amsterdam
+            end_date = now_amsterdam
 
-# class PredictionsView(APIView):
-#     def get(self, request):
-#         # 1. Filter campaigns from the last 24 hours
-#         now = timezone.now()
-#         last_24_hours = now - timedelta(hours=24)
-#         campaigns = campaigns = Campaign.objects.filter(timestamp__gte=last_24_hours).distinct()
-#         serializer = CampaignSerializer(campaigns, many=True)
+            payload = {
+                "range": {
+                    "from": start_date.strftime("%Y-%m-%d"),
+                    "to": end_date.strftime("%Y-%m-%d"),
+                    "timezone": "Europe/Amsterdam"
+                },
+                "columns": ["clicks", "day", "lp_clicks", "lp_ctr", "cr", "cpc"],
+                "metrics": [
+                    "clicks", "cost", "campaign_unique_clicks", "conversions",
+                    "roi_confirmed", "revenue", "profit"
+                ],
+                "grouping": ["sub_id_6", "sub_id_5", "sub_id_2", "sub_id_3"],
+                "filters": [],
+                "summary": False,
+                "limit": 100000,
+                "offset": 0,
+                "extended": True
+            }
 
-#         # 2. Flatten JSON: campaign + metrics
-#         flat_data_list = []
-#         for campaign_data in serializer.data:
-#             flat_data = {
-#                 **{k: v for k, v in campaign_data.items() if k != 'metrics'},
-#                 **campaign_data.get('metrics', {})
-#             }
-#             flat_data_list.append(flat_data)
-#         df = pd.DataFrame(flat_data_list)
+            headers = {
+                "Api-Key": api_key,
+                "Content-Type": "application/json"
+            }
 
-#         if df.empty:
-#             return Response({
-#                 "success": False,
-#                 "message": "No campaign data found in the last 24 hours."
-#             })
+            response = requests.post(
+                f"{base_url}/report/build",
+                headers=headers,
+                json=payload,
+                timeout=30
+            )
+            response.raise_for_status()
+            data = response.json()
 
-#         # 3. Create 8 DataFrames by state and drop duplicate campaign_id in each
-#         grouped_dfs = []
-#         df['state'] = pd.to_numeric(df.get('state', -1), errors='coerce').fillna(-1).astype(int)
-#         for i in range(8):
-#             state_df = df[df['state'] == i].copy()
-#             state_df = state_df.drop_duplicates(subset='campaign_id', keep='last').reset_index(drop=True)
-#             grouped_dfs.append(state_df)
+            # Save raw API response
+            with open('api_response.json', 'w') as f:
+                json.dump(data, f, indent=4)
 
-#         # 4. Combine all 8 DataFrames
-#         combined_df = pd.concat(grouped_dfs, ignore_index=True)
+            rows = data.get('rows', [])
+            if not rows:
+                return Response({'success': True, 'data': [], 'summary': {}}, status=status.HTTP_200_OK)
 
-#         # 5. Ensure numeric metric fields
-#         metric_fields = [
-#             'cost', 'revenue', 'profit', 'clicks', 'conversions',
-#             'conversion_rate', 'roi', 'cpc', 'profit_margin'
-#         ]
-#         for field in metric_fields:
-#             combined_df[field] = pd.to_numeric(combined_df.get(field, 0), errors='coerce').fillna(0)
+            df = pd.DataFrame(rows)
 
-#         # 6. Average metrics per campaign
-#         avg_df = combined_df.groupby(['campaign_id', 'campaign_name'], as_index=False)[metric_fields].mean()
+            df.to_csv("media/row_data.csv", index=False)
 
-#         if avg_df.empty:
-#             return Response({
-#                 "success": False,
-#                 "message": "No campaign data with valid metrics."
-#             })
+            def is_empty_or_placeholder(val):
+                if pd.isna(val):
+                    return True
+                if isinstance(val, str) and (val.strip() == "" or val.strip().startswith("{{")):
+                    return True
+                return False
 
-#         # 7. Run recommendation model
-#         scaler, dbscan, features = load_model()
-#         processed_df = preprocess(avg_df.copy(), features)
-#         X = processed_df[features].copy()
-#         X = scaler.transform(X)
-#         cluster_labels = dbscan.fit_predict(X)
-#         recommendations = map_clusters_to_recommendations(processed_df, cluster_labels)
+            df = df.applymap(lambda x: pd.NA if is_empty_or_placeholder(x) else x)
 
-#         # 8. Final response with all fields
-#         output = []
-#         for row, rec in zip(avg_df.to_dict(orient="records"), recommendations):
-#             output.append({
-#                 "campaign_id": row["campaign_id"],
-#                 "campaign": row["campaign_name"],
-#                 "recommendation": rec,
-#                 "cost": row["cost"],
-#                 "revenue": row["revenue"],
-#                 "profit": row["profit"],
-#                 "clicks": row["clicks"],
-#                 "conversions": row["conversions"],
-#                 "conversion_rate": row["conversion_rate"],
-#                 "roi": row["roi"],
-#                 "cpc": row["cpc"],
-#                 "profit_margin": row["profit_margin"]
-#             })
+            for col in ['sub_id_2', 'sub_id_3']:
+                if col in df.columns and df[col].isna().all():
+                    df.drop(columns=col, inplace=True)
 
-#         return Response({
-#             "success": True,
-#             "recommendations": output
-#         })
+            cols_to_check = ['sub_id_6', 'sub_id_5', 'sub_id_3', 'sub_id_2']
+            cols_existing = [col for col in cols_to_check if col in df.columns]
+            df = df.dropna(subset=cols_existing, how='all')
+
+            if 'sub_id_2' in df.columns:
+                df = df.drop_duplicates(subset='sub_id_2', keep='first')
+
+            df["geo"] = df["sub_id_6"].apply(extract_geo)
+            df["country"] = df["geo"].apply(extract_country_name)
+
+            df.to_csv("media/row_data.csv", index=False)
+            df.to_json("media/preprocess_data.json", orient='records', indent=2)
+
+            data_path =os.path.join(settings.MEDIA_ROOT, 'preprocess_data.json')
+
+            data = main(data_path)
+
+            
+            all_data_items.extend(data)
+            grouped = defaultdict(list)
+
+            for item in data:
+                key = (item['sub_id_6'], item['sub_id_3'])
+                grouped[key].append(item)
+
+            output = []
+            for (sub_id_6, sub_id_3), items in grouped.items():
+                df_group = pd.DataFrame(items)
+
+                output.append({
+                    "id": str(uuid.uuid4()),
+                    "sub_id_6": sub_id_6,
+                    "sub_id_3": sub_id_3,
+                    "total_cost": round(df_group['cost'].sum(), 2),
+                    "total_revenue": round(df_group['revenue'].sum(), 2),
+                    "total_profit": round(df_group['profit'].sum(), 2),
+                    "total_clicks": int(df_group['clicks'].sum()),
+                    "average_cpc": round(df_group['cpc'].sum(), 4) if 'cpc' in df_group else None,
+                    "average_roi": round(df_group['roi_confirmed'].sum(), 4) if 'roi_confirmed' in df_group else None,
+                    "average_conversion_rate": round(df_group['conversion_rate'].sum(), 4) if 'conversion_rate' in df_group else None,
+                    "adset": items
+                })
+
+            model_path = os.path.join(settings.MEDIA_ROOT, 'dbscan_model_bundle_latest.pkl')
+
+            final_results = []
+            for group in output:  # Your grouped campaign list
+                enriched = enrich_campaign_data(group, model_path=model_path)
+                final_results.append(enriched)
+
+            summary = {}
+            if all_data_items:
+                summary_df = pd.DataFrame(all_data_items)
+                if not summary_df.empty:
+                    summary = {
+                        "total_adset" : len(summary_df),
+                        "total_cost": round(summary_df['cost'].sum(), 2),
+                        "total_revenue": round(summary_df['revenue'].sum(), 2),
+                        "total_profit": round(summary_df['profit'].sum(), 2),
+                        "total_clicks": int(summary_df['clicks'].sum()),
+                        "total_conversions": int(summary_df['conversions'].sum()),
+                        "average_roi": round(summary_df['roi_confirmed'].mean(), 4),
+                        "average_conversion_rate": round(summary_df['conversion_rate'].mean(), 4),
+                        "priority_distribution": summary_df['priority'].astype(str).value_counts().to_dict()
+                    }
+            else:
+                summary = {}
+
+            return Response({'success': True, 'data': final_results, 'summary': summary}, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
