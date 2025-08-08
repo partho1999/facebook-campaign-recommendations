@@ -193,11 +193,11 @@ def enrich_campaign_data(input_data, model_path=None):
         recalculated_budget_changes = [calculate_budget_change_pct(a) for a in budgeted_adsets]
         average_budget_change_pct = round(np.mean(recalculated_budget_changes))
 
-        average_roi = input_data.get("average_roi", 0)
-        if average_roi > 0:
-            recommendation_percentage = round(min(200, average_roi / 5))
+        total_roi = input_data.get("total_roi", 0)
+        if total_roi > 0:
+            recommendation_percentage = round(min(200, total_roi / 5))
         else:
-            recommendation_percentage = -round(min(50, abs(average_roi) / 2))
+            recommendation_percentage = -round(min(50, abs(total_roi) / 2))
 
         total_roi = sum(a.get('roi_confirmed', 0) for a in budgeted_adsets)
         if total_roi > 0:
