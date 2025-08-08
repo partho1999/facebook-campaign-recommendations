@@ -544,6 +544,9 @@ class PredictCampaignsUpdateView(APIView):
             if all_data_items:
                 summary_df = pd.DataFrame(all_data_items)
                 if not summary_df.empty:
+                    total_cost = round(summary_df['cost'].sum(), 2)
+                    total_revenue = round(summary_df['revenue'].sum(), 2)
+                    total_roi = round(((total_revenue - total_cost) / total_cost) * 100, 2) if total_cost > 0 else 0
                     summary = {
                         "total_adset" : len(summary_df),
                         "total_cost": round(summary_df['cost'].sum(), 2),
@@ -551,7 +554,7 @@ class PredictCampaignsUpdateView(APIView):
                         "total_profit": round(summary_df['profit'].sum(), 2),
                         "total_clicks": int(summary_df['clicks'].sum()),
                         "total_conversions": int(summary_df['conversions'].sum()),
-                        "average_roi": round(summary_df['roi_confirmed'].mean(), 4),
+                        "total_roi": total_roi,
                         "average_conversion_rate": round(summary_df['conversion_rate'].mean(), 4),
                         "priority_distribution": summary_df['priority'].astype(str).value_counts().to_dict()
                     }
