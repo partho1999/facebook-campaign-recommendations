@@ -393,7 +393,7 @@ class PredictTimeRangeView(APIView):
                         "total_profit": round(summary_df['profit'].sum(), 2),
                         "total_clicks": int(summary_df['clicks'].sum()),
                         "total_conversions": int(summary_df['conversions'].sum()),
-                        "average_roi": round(summary_df['roi_confirmed'].mean(), 4),
+                        "total_roi": round(summary_df['roi_confirmed'].mean(), 4),
                         "average_conversion_rate": round(summary_df['conversion_rate'].mean(), 4),
                         "priority_distribution": summary_df['priority'].astype(str).value_counts().to_dict()
                     }
@@ -509,17 +509,27 @@ class PredictCampaignsUpdateView(APIView):
             for (sub_id_6, sub_id_3), items in grouped.items():
                 df_group = pd.DataFrame(items)
 
+                total_cost = round(df_group['cost'].sum(), 2)
+                total_revenue = round(df_group['revenue'].sum(), 2)
+                total_profit = round(total_revenue - total_cost, 2)
+                total_clicks = int(round(df_group['clicks'].sum()))
+                total_conversions = int(round(df_group['conversions'].sum()))
+
+                total_roi = round(((total_revenue - total_cost) / total_cost) * 100, 2) if total_cost > 0 else 0
+                total_conversion_rate = round((total_conversions / total_clicks) * 100, 2) if total_clicks > 0 else 0
+                total_cpc = round((total_cost / total_clicks), 2) if total_clicks > 0 else 0
+
                 output.append({
                     "id": str(uuid.uuid4()),
                     "sub_id_6": sub_id_6,
                     "sub_id_3": sub_id_3,
-                    "total_cost": round(df_group['cost'].sum(), 2),
-                    "total_revenue": round(df_group['revenue'].sum(), 2),
-                    "total_profit": round(df_group['profit'].sum(), 2),
-                    "total_clicks": int(df_group['clicks'].sum()),
-                    "average_cpc": round(df_group['cpc'].sum(), 4) if 'cpc' in df_group else None,
-                    "average_roi": round(df_group['roi_confirmed'].sum(), 4) if 'roi_confirmed' in df_group else None,
-                    "average_conversion_rate": round(df_group['conversion_rate'].sum(), 4) if 'conversion_rate' in df_group else None,
+                    "total_cost": total_cost,
+                    "total_revenue": total_revenue,
+                    "total_profit": total_profit,
+                    "total_clicks": total_clicks,
+                    "total_cpc": total_cpc,
+                    "total_roi": total_roi,
+                    "total_conversion_rate": total_conversion_rate,
                     "adset": items
                 })
 
