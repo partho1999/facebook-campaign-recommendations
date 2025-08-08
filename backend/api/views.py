@@ -285,9 +285,6 @@ class PredictTimeRangeView(APIView):
                 return Response({'success': True, 'data': [], 'summary': {}}, status=status.HTTP_200_OK)
 
             df = pd.DataFrame(rows)
-            # df = df.dropna(subset=["sub_id_6", "sub_id_5", "sub_id_2", "sub_id_3"], how="all")
-            # df.to_csv("media/row_data_time_range.csv", index=False)
-            
 
             def is_empty_or_placeholder(val):
                 if pd.isna(val):
@@ -297,7 +294,6 @@ class PredictTimeRangeView(APIView):
                 return False
 
             df = df.applymap(lambda x: pd.NA if is_empty_or_placeholder(x) else x)
-            # df.to_csv("media/row_data_time_range.csv", index=False)
 
             for col in ['sub_id_2', 'sub_id_3']:
                 if col in df.columns and df[col].isna().all():
@@ -307,18 +303,30 @@ class PredictTimeRangeView(APIView):
             cols_existing = [col for col in cols_to_check if col in df.columns]
             df = df.dropna(subset=cols_existing, how='all')
 
+            # You must implement these extraction functions based on your data
+            def extract_geo(sub_id_6):
+                # Example extraction (customize as needed)
+                return sub_id_6.split(" - ")[1] if " - " in sub_id_6 else None
+
+            def extract_country_name(geo):
+                # Example mapping (customize as needed)
+                if geo == "US":
+                    return "United States"
+                return geo
+
             df["geo"] = df["sub_id_6"].apply(extract_geo)
             df["country"] = df["geo"].apply(extract_country_name)
 
-
+            # Save preprocessed data to file (optional)
             df.to_csv("media/row_data_time_range.csv", index=False)
             df.to_json("media/preprocess_data_time_range.json", orient='records', indent=2)
 
-            data_path =os.path.join(settings.MEDIA_ROOT, 'preprocess_data_time_range.json')
+            data_path = os.path.join(settings.MEDIA_ROOT, 'preprocess_data_time_range.json')
 
-            # Call your processing function which returns a list of dicts
+            # Your processing function (you must define it)
             processed_data = main(data_path)
 
+            # Save all processed items
             all_data_items = []
             for item in processed_data:
                 try:
@@ -363,31 +371,81 @@ class PredictTimeRangeView(APIView):
 
             all_data_items.extend(processed_data)
 
-            # Group data for output
+            # --- NEW GROUPING LOGIC ---
+
+            # Group by (sub_id_6, sub_id_3)
             grouped = defaultdict(list)
             for item in processed_data:
-                key = (item.get('sub_id_6'), item.get('sub_id_3'), item.get('day'))
+                key = (item.get('sub_id_6'), item.get('sub_id_3'))
                 grouped[key].append(item)
 
             output = []
-            for (sub_id_6, sub_id_3, day), items in grouped.items():
+            for (sub_id_6, sub_id_3), items in grouped.items():
+                # Group inside by day
+                day_grouped = defaultdict(list)
+                for adset_item in items:
+                    day_key = adset_item.get('day')
+                    day_grouped[day_key].append(adset_item)
+
+                # Campaign level aggregations using pandas DataFrame
+                df_campaign = pd.DataFrame(items)
+
+                total_cost = round(df_campaign['cost'].sum(), 2)
+                total_revenue = round(df_campaign['revenue'].sum(), 2)
+                total_profit = round(total_revenue - total_cost, 2)
+                total_clicks = int(round(df_campaign['clicks'].sum()))
+                total_conversions = int(round(df_campaign['conversions'].sum()))
+
+                total_roi = round(((total_revenue - total_cost) / total_cost) * 100, 2) if total_cost > 0 else 0
+                total_conversion_rate = round((total_conversions / total_clicks) * 100, 2) if total_clicks > 0 else 0
+                total_cpc = round((total_cost / total_clicks), 2) if total_clicks > 0 else 0
+
+                # # Placeholder recommendation values - replace with your logic if needed
+                # recommendation = "PAUSE"
+                # recommendation_percentage = None
+                # total_budget_change_pct_sum = None
+
                 output.append({
                     "id": str(uuid.uuid4()),
                     "sub_id_6": sub_id_6,
                     "sub_id_3": sub_id_3,
-                    "day": day,
-                    "adset": items
+                    "total_cost": total_cost,
+                    "total_revenue": total_revenue,
+                    "total_profit": total_profit,
+                    "total_clicks": total_clicks,
+                    "total_cpc": total_cpc,
+                    "total_roi": total_roi,
+                    "total_conversion_rate": total_conversion_rate,
+                    "day": {
+                        day: {"adset": adsets} for day, adsets in day_grouped.items()
+                    }
                 })
 
-            # Sort output by day (latest to oldest)
-            output.sort(key=lambda x: x['day'], reverse=True)
+            # Sort output by day descending (based on the most recent day in each campaign group)
+            def most_recent_day(campaign):
+                # convert string date keys to datetime, get max
+                try:
+                    return max(datetime.strptime(d, "%Y-%m-%d") for d in campaign["day"].keys())
+                except Exception:
+                    return datetime.min
 
+            output.sort(key=most_recent_day, reverse=True)
+
+            model_path = os.path.join(settings.MEDIA_ROOT, 'dbscan_model_bundle_latest.pkl')
+
+            final_results = []
+            for group in output:  # Your grouped campaign list
+                enriched = enrich_campaign_data(group, model_path=model_path)
+                final_results.append(enriched)
+
+
+            # Generate overall summary (optional)
             summary = {}
             if all_data_items:
                 summary_df = pd.DataFrame(all_data_items)
                 if not summary_df.empty:
                     summary = {
-                        "total_adset" : len(summary_df),
+                        "total_adset": len(summary_df),
                         "total_cost": round(summary_df['cost'].sum(), 2),
                         "total_revenue": round(summary_df['revenue'].sum(), 2),
                         "total_profit": round(summary_df['profit'].sum(), 2),
@@ -398,14 +456,12 @@ class PredictTimeRangeView(APIView):
                         "priority_distribution": summary_df['priority'].astype(str).value_counts().to_dict()
                     }
 
-            return Response({'success': True, 'data': output, 'summary': summary}, status=status.HTTP_200_OK)
+            return Response({'success': True, 'data': final_results, 'summary': summary}, status=status.HTTP_200_OK)
 
         except requests.RequestException as e:
-            # For network-related errors
             return Response({'success': False, 'error': f'API request failed: {str(e)}'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         except Exception as e:
-            # General catch-all for unexpected errors
             return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -519,6 +575,11 @@ class PredictCampaignsUpdateView(APIView):
                 total_conversion_rate = round((total_conversions / total_clicks) * 100, 2) if total_clicks > 0 else 0
                 total_cpc = round((total_cost / total_clicks), 2) if total_clicks > 0 else 0
 
+                # Group items by 'day'
+                day_dict = defaultdict(lambda: {"adset": []})
+                for adset in items:
+                    day_dict[adset["day"]]["adset"].append(adset)
+
                 output.append({
                     "id": str(uuid.uuid4()),
                     "sub_id_6": sub_id_6,
@@ -530,7 +591,7 @@ class PredictCampaignsUpdateView(APIView):
                     "total_cpc": total_cpc,
                     "total_roi": total_roi,
                     "total_conversion_rate": total_conversion_rate,
-                    "adset": items
+                    "day": dict(day_dict)  # note key changed from 'adset' list to grouped by day
                 })
 
             model_path = os.path.join(settings.MEDIA_ROOT, 'dbscan_model_bundle_latest.pkl')

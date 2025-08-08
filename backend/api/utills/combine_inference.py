@@ -6,6 +6,7 @@ import joblib
 from datetime import datetime
 import warnings
 from django.conf import settings
+from collections import defaultdict
 
 warnings.filterwarnings('ignore')
 
@@ -153,16 +154,18 @@ class DBSCANCampaignInference:
 
 
 def enrich_campaign_data(input_data, model_path=None):
-    inference = DBSCANCampaignInference(model_path=model_path)
-    df_result = inference.run_inference(input_data, save_results=False)
-    adsets_with_recs = df_result.to_dict(orient='records')
+    # Flatten all adsets from all days into a single list
+    all_adsets = []
+    day_data = input_data.get("day", {})
+    for day_key, day_val in day_data.items():
+        day_adsets = day_val.get("adset", [])
+        for adset in day_adsets:
+            # Optionally add day info to each adset so you can regroup later
+            adset['day'] = day_key
+            all_adsets.append(adset)
 
-    budgeted_adsets = [a for a in adsets_with_recs if a.get('cost', 0) >= 5]
-    total_budgeted = len(budgeted_adsets)
-
-def enrich_campaign_data(input_data, model_path=None):
     inference = DBSCANCampaignInference(model_path=model_path)
-    df_result = inference.run_inference(input_data, save_results=False)
+    df_result = inference.run_inference(all_adsets, save_results=False)
     adsets_with_recs = df_result.to_dict(orient='records')
 
     budgeted_adsets = [a for a in adsets_with_recs if a.get('cost', 0) >= 5]
@@ -172,15 +175,14 @@ def enrich_campaign_data(input_data, model_path=None):
         roi = adset.get('roi_confirmed', 0)
         rec = adset.get('recommendation', '')
         if rec == "INCREASE_BUDGET":
-            increase_pct = round(min(200, roi / 5))
+            return round(min(200, roi / 5))
         elif rec in ["REDUCE_BUDGET", "OPTIMIZE"]:
             if roi < 0:
-                increase_pct = -round(min(50, abs(roi) / 2))
+                return -round(min(50, abs(roi) / 2))
             else:
-                increase_pct = 0
+                return 0
         else:
-            increase_pct = 0
-        return increase_pct
+            return 0
 
     if total_budgeted > 0:
         rec_counts = {}
@@ -199,22 +201,25 @@ def enrich_campaign_data(input_data, model_path=None):
         else:
             recommendation_percentage = -round(min(50, abs(total_roi) / 2))
 
-        total_roi = sum(a.get('roi_confirmed', 0) for a in budgeted_adsets)
-        if total_roi > 0:
-            total_budget_change_pct_sum = round(min(200, total_roi / 5))
+        total_roi_sum = sum(a.get('roi_confirmed', 0) for a in budgeted_adsets)
+        if total_roi_sum > 0:
+            total_budget_change_pct_sum = round(min(200, total_roi_sum / 5))
         else:
-            total_budget_change_pct_sum = -round(min(50, abs(total_roi) / 2))
+            total_budget_change_pct_sum = -round(min(50, abs(total_roi_sum) / 2))
 
-        # Override recommendation if recommendation_percentage is negative
         if recommendation_percentage < 0:
             majority_rec = "PAUSE"
-            # Optional: you might want to also force recommendation_percentage positive 0 or abs here or keep as is
-
     else:
         majority_rec = "KEEP_RUNNING"
         average_budget_change_pct = 0
         recommendation_percentage = 0
         total_budget_change_pct_sum = 0.0
+
+    # Regroup adsets by day with recommendations
+    day_dict = defaultdict(lambda: {"adset": []})
+    for adset in adsets_with_recs:
+        day = adset.get("day", "unknown_day")
+        day_dict[day]["adset"].append(adset)
 
     output = {
         "id": input_data.get("id"),
@@ -230,8 +235,7 @@ def enrich_campaign_data(input_data, model_path=None):
         "recommendation": majority_rec,
         "recommendation_percentage": recommendation_percentage,
         "total_budget_change_pct_sum": total_budget_change_pct_sum,
-        "adset": adsets_with_recs
+        "day": dict(day_dict),
     }
+
     return output
-
-
