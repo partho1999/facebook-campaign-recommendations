@@ -154,23 +154,26 @@ class DBSCANCampaignInference:
 
 
 def enrich_campaign_data(input_data, model_path=None):
-    # Flatten all adsets from all days into a single list
-    all_adsets = []
-    day_data = input_data.get("day", {})
-    for day_key, day_val in day_data.items():
-        day_adsets = day_val.get("adset", [])
-        for adset in day_adsets:
-            # Optionally add day info to each adset so you can regroup later
-            adset['day'] = day_key
-            all_adsets.append(adset)
+    """
+    Enrich a campaign dict (with 'adset' as a flat list) 
+    using DBSCAN clustering and generate recommendations.
+    """
 
+    # The adset list already contains 'day' field from PredictCampaignsDailyView
+    all_adsets = input_data.get("adset", [])
+    if not all_adsets:
+        return input_data  # Nothing to enrich
+
+    # Run DBSCAN inference
     inference = DBSCANCampaignInference(model_path=model_path)
     df_result = inference.run_inference(all_adsets, save_results=False)
     adsets_with_recs = df_result.to_dict(orient='records')
 
+    # Filter budgeted adsets (>= $5 spend)
     budgeted_adsets = [a for a in adsets_with_recs if a.get('cost', 0) >= 5]
     total_budgeted = len(budgeted_adsets)
 
+    # Helper to recalculate budget change pct
     def calculate_budget_change_pct(adset):
         roi = adset.get('roi_confirmed', 0)
         rec = adset.get('recommendation', '')
@@ -185,22 +188,25 @@ def enrich_campaign_data(input_data, model_path=None):
             return 0
 
     if total_budgeted > 0:
+        # Find majority recommendation
         rec_counts = {}
         for a in budgeted_adsets:
             rec = a.get('recommendation')
             rec_counts[rec] = rec_counts.get(rec, 0) + 1
-
         majority_rec = max(rec_counts.items(), key=lambda x: x[1])[0]
 
+        # Average budget change from all adsets
         recalculated_budget_changes = [calculate_budget_change_pct(a) for a in budgeted_adsets]
         average_budget_change_pct = round(np.mean(recalculated_budget_changes))
 
+        # Campaign-level recommendation percentage
         total_roi = input_data.get("total_roi", 0)
         if total_roi > 0:
             recommendation_percentage = round(min(200, total_roi / 5))
         else:
             recommendation_percentage = -round(min(50, abs(total_roi) / 2))
 
+        # Total budget change based on sum ROI
         total_roi_sum = sum(a.get('roi_confirmed', 0) for a in budgeted_adsets)
         if total_roi_sum > 0:
             total_budget_change_pct_sum = round(min(200, total_roi_sum / 5))
@@ -215,12 +221,7 @@ def enrich_campaign_data(input_data, model_path=None):
         recommendation_percentage = 0
         total_budget_change_pct_sum = 0.0
 
-    # Regroup adsets by day with recommendations
-    day_dict = defaultdict(lambda: {"adset": []})
-    for adset in adsets_with_recs:
-        day = adset.get("day", "unknown_day")
-        day_dict[day]["adset"].append(adset)
-
+    # Final enriched campaign output — keep flat adset list
     output = {
         "id": input_data.get("id"),
         "sub_id_6": input_data.get("sub_id_6"),
@@ -235,7 +236,8 @@ def enrich_campaign_data(input_data, model_path=None):
         "recommendation": majority_rec,
         "recommendation_percentage": recommendation_percentage,
         "total_budget_change_pct_sum": total_budget_change_pct_sum,
-        "day": dict(day_dict),
+        "adset": adsets_with_recs  # Replace old adsets with enriched ones
     }
-
+    
     return output
+

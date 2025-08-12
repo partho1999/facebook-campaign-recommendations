@@ -626,3 +626,370 @@ class PredictCampaignsUpdateView(APIView):
 
         except Exception as e:
             return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class PredictCampaignsDailyView(APIView):
+    def get(self, request):
+        try:
+            # API config
+            api_key = os.getenv("API_KEY")
+            base_url = "https://tracktheweb.online/admin_api/v1"
+            all_data_items = []
+
+            # Use current Amsterdam time for both start and end date
+            now_amsterdam = datetime.now(ZoneInfo("Europe/Amsterdam"))
+            start_date = now_amsterdam
+            end_date = now_amsterdam
+
+            payload = {
+                "range": {
+                    "from": start_date.strftime("%Y-%m-%d"),
+                    "to": end_date.strftime("%Y-%m-%d"),
+                    "timezone": "Europe/Amsterdam"
+                },
+                "columns": ["clicks", "day", "lp_clicks", "lp_ctr", "cr", "cpc"],
+                "metrics": [
+                    "clicks", "cost", "campaign_unique_clicks", "conversions",
+                    "roi_confirmed", "revenue", "profit"
+                ],
+                "grouping": ["sub_id_6", "sub_id_5", "sub_id_2", "sub_id_3"],
+                "filters": [],
+                "summary": False,
+                "limit": 100000,
+                "offset": 0,
+                "extended": True
+            }
+
+            headers = {
+                "Api-Key": api_key,
+                "Content-Type": "application/json"
+            }
+
+            response = requests.post(
+                f"{base_url}/report/build",
+                headers=headers,
+                json=payload,
+                timeout=30
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            # Save raw API response
+            with open('api_response.json', 'w') as f:
+                json.dump(data, f, indent=4)
+
+            rows = data.get('rows', [])
+            if not rows:
+                return Response({'success': True, 'data': [], 'summary': {}}, status=status.HTTP_200_OK)
+
+            df = pd.DataFrame(rows)
+
+            df.to_csv("media/row_data.csv", index=False)
+
+            def is_empty_or_placeholder(val):
+                if pd.isna(val):
+                    return True
+                if isinstance(val, str) and (val.strip() == "" or val.strip().startswith("{{")):
+                    return True
+                return False
+
+            df = df.applymap(lambda x: pd.NA if is_empty_or_placeholder(x) else x)
+
+            for col in ['sub_id_2', 'sub_id_3']:
+                if col in df.columns and df[col].isna().all():
+                    df.drop(columns=col, inplace=True)
+
+            cols_to_check = ['sub_id_6', 'sub_id_5', 'sub_id_3', 'sub_id_2']
+            cols_existing = [col for col in cols_to_check if col in df.columns]
+            df = df.dropna(subset=cols_existing, how='all')
+
+            if 'sub_id_2' in df.columns:
+                df = df.drop_duplicates(subset='sub_id_2', keep='first')
+
+            df["geo"] = df["sub_id_6"].apply(extract_geo)
+            df["country"] = df["geo"].apply(extract_country_name)
+
+            df.to_csv("media/row_data.csv", index=False)
+            df.to_json("media/preprocess_data.json", orient='records', indent=2)
+
+            data_path =os.path.join(settings.MEDIA_ROOT, 'preprocess_data.json')
+
+            data = main(data_path)
+
+            all_data_items.extend(data)
+            grouped = defaultdict(list)
+
+            for item in data:
+                key = (item['sub_id_6'], item['sub_id_3'])
+                grouped[key].append(item)
+
+            output = []
+            for (sub_id_6, sub_id_3), items in grouped.items():
+                df_group = pd.DataFrame(items)
+
+                total_cost = round(df_group['cost'].sum(), 2)
+                total_revenue = round(df_group['revenue'].sum(), 2)
+                total_profit = round(total_revenue - total_cost, 2)
+                total_clicks = int(round(df_group['clicks'].sum()))
+                total_conversions = int(round(df_group['conversions'].sum()))
+
+                total_roi = round(((total_revenue - total_cost) / total_cost) * 100, 2) if total_cost > 0 else 0
+                total_conversion_rate = round((total_conversions / total_clicks) * 100, 2) if total_clicks > 0 else 0
+                total_cpc = round((total_cost / total_clicks), 2) if total_clicks > 0 else 0
+
+                output.append({
+                    "id": str(uuid.uuid4()),
+                    "sub_id_6": sub_id_6,
+                    "sub_id_3": sub_id_3,
+                    "total_cost": total_cost,
+                    "total_revenue": total_revenue,
+                    "total_profit": total_profit,
+                    "total_clicks": total_clicks,
+                    "total_cpc": total_cpc,
+                    "total_roi": total_roi,
+                    "total_conversion_rate": total_conversion_rate,
+                    "adset": items
+                })
+
+            model_path = os.path.join(settings.MEDIA_ROOT, 'dbscan_model_bundle_latest.pkl')
+
+            final_results = []
+            for group in output:  # Your grouped campaign list
+                enriched = enrich_campaign_data(group, model_path=model_path)
+                final_results.append(enriched)
+
+            summary = {}
+            if all_data_items:
+                summary_df = pd.DataFrame(all_data_items)
+                if not summary_df.empty:
+                    total_cost = round(summary_df['cost'].sum(), 2)
+                    total_revenue = round(summary_df['revenue'].sum(), 2)
+                    total_roi = round(((total_revenue - total_cost) / total_cost) * 100, 2) if total_cost > 0 else 0
+
+                    summary = {
+                        "total_adset" : len(summary_df),
+                        "total_cost": round(summary_df['cost'].sum(), 2),
+                        "total_revenue": round(summary_df['revenue'].sum(), 2),
+                        "total_profit": round(summary_df['profit'].sum(), 2),
+                        "total_clicks": int(summary_df['clicks'].sum()),
+                        "total_conversions": int(summary_df['conversions'].sum()),
+                        "total_roi": total_roi,
+                        "average_conversion_rate": round(summary_df['conversion_rate'].mean(), 4),
+                        "priority_distribution": summary_df['priority'].astype(str).value_counts().to_dict()
+                    }
+            else:
+                summary = {}
+
+            return Response({'success': True, 'data': final_results, 'summary': summary}, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+class PredictDateRangeView(APIView):
+    """
+    API endpoint to get ad set campaign data within a date range,
+    process, save in DB and return grouped result and summary.
+    """
+
+    def get(self, request):
+        try:
+            api_key = os.getenv("API_KEY") or getattr(settings, "API_KEY", None)
+            if not api_key:
+                return Response({"success": False, "error": "API_KEY not set."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+            base_url = "https://tracktheweb.online/admin_api/v1"
+
+            # Get date range params
+            start_str = request.query_params.get('start_date')
+            end_str = request.query_params.get('end_date')
+
+            amsterdam_tz = ZoneInfo("Europe/Amsterdam")
+
+            try:
+                # Parse dates or fallback to now
+                if start_str:
+                    start_date = datetime.strptime(start_str, "%Y-%m-%d")
+                    start_date = make_aware(start_date, amsterdam_tz)
+                else:
+                    start_date = datetime.now(amsterdam_tz)
+
+                if end_str:
+                    end_date = datetime.strptime(end_str, "%Y-%m-%d")
+                    end_date = make_aware(end_date, amsterdam_tz)
+                else:
+                    end_date = datetime.now(amsterdam_tz)
+            except ValueError:
+                return Response({"success": False, "error": "Invalid date format. Use YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
+
+            payload = {
+                "range": {
+                    "from": start_date.strftime("%Y-%m-%d"),
+                    "to": end_date.strftime("%Y-%m-%d"),
+                    "timezone": "Europe/Amsterdam"
+                },
+                "columns": ["clicks", "day", "lp_clicks", "lp_ctr", "cr", "cpc"],
+                "metrics": [
+                    "clicks", "cost", "campaign_unique_clicks", "conversions",
+                    "roi_confirmed", "revenue", "profit"
+                ],
+                "grouping": ["sub_id_6", "sub_id_5", "sub_id_2", "sub_id_3"],
+                "filters": [],
+                "summary": False,
+                "limit": 100000,
+                "offset": 0,
+                "extended": True
+            }
+
+            headers = {
+                "Api-Key": api_key,
+                "Content-Type": "application/json"
+            }
+
+            response = requests.post(f"{base_url}/report/build", headers=headers, json=payload, timeout=30)
+            response.raise_for_status()
+
+            data = response.json()
+
+            # Save raw API response for debugging
+            with open('api_response.json', 'w') as f:
+                json.dump(data, f, indent=4)
+
+            rows = data.get('rows', [])
+            if not rows:
+                return Response({'success': True, 'data': [], 'summary': {}}, status=status.HTTP_200_OK)
+
+            df = pd.DataFrame(rows)
+
+            def is_empty_or_placeholder(val):
+                if pd.isna(val):
+                    return True
+                if isinstance(val, str) and (val.strip() == "" or val.strip().startswith("{{")):
+                    return True
+                return False
+
+            df = df.applymap(lambda x: pd.NA if is_empty_or_placeholder(x) else x)
+
+            for col in ['sub_id_2', 'sub_id_3']:
+                if col in df.columns and df[col].isna().all():
+                    df.drop(columns=col, inplace=True)
+
+            cols_to_check = ['sub_id_6', 'sub_id_5', 'sub_id_3', 'sub_id_2']
+            cols_existing = [col for col in cols_to_check if col in df.columns]
+            df = df.dropna(subset=cols_existing, how='all')
+
+            def extract_geo(sub_id_6):
+                return sub_id_6.split(" - ")[1] if " - " in sub_id_6 else None
+
+            def extract_country_name(geo):
+                if geo == "US":
+                    return "United States"
+                return geo
+
+            df["geo"] = df["sub_id_6"].apply(extract_geo)
+            df["country"] = df["geo"].apply(extract_country_name)
+
+            df = df.groupby('sub_id_2').agg({
+                'cost': 'sum',
+                'revenue': 'sum',
+                'clicks': 'sum',
+                'lp_clicks': 'sum',
+                'conversions': 'sum',
+                'campaign_unique_clicks': 'sum',
+                'sub_id_6': 'first',
+                'sub_id_5': 'first',
+                'sub_id_3': 'first',
+                'day': 'first',
+                'geo': 'first',
+                'country': 'first'
+            }).reset_index()
+
+            df['profit'] = df['revenue'] - df['cost']
+            df['cpc'] = df.apply(lambda x: x['cost'] / x['clicks'] if x['clicks'] > 0 else 0, axis=1)
+            df['roi_confirmed'] = df.apply(lambda x: (x['profit'] / x['cost']) * 100 if x['cost'] > 0 else 0, axis=1)
+
+            df['lp_ctr'] = df.apply(lambda x: (x['lp_clicks'] / x['clicks']) * 100 if x['clicks'] > 0 else 0, axis=1)
+            df['cr'] = df.apply(lambda x: (x['conversions'] / x['clicks']) * 100 if x['clicks'] > 0 else 0, axis=1)
+
+            df.to_csv("media/row_data_time_range.csv", index=False)
+            df.to_json("media/preprocess_data_time_range.json", orient='records', indent=2)
+
+            data_path = os.path.join(settings.MEDIA_ROOT, 'preprocess_data_time_range.json')
+
+            processed_data = main(data_path)
+
+            all_data_items = []
+            all_data_items.extend(processed_data)
+
+            # ----------- New grouping function -----------
+            def group_processed_data(data):
+                grouped = defaultdict(list)
+                for item in data:
+                    key = (item['sub_id_6'], item['sub_id_3'])
+                    grouped[key].append(item)
+
+                output = []
+                for (sub_id_6, sub_id_3), items in grouped.items():
+                    df_group = pd.DataFrame(items)
+
+                    total_cost = round(df_group['cost'].sum(), 2)
+                    total_revenue = round(df_group['revenue'].sum(), 2)
+                    total_profit = round(total_revenue - total_cost, 2)
+                    total_clicks = int(round(df_group['clicks'].sum()))
+                    total_conversions = int(round(df_group['conversions'].sum()))
+
+                    total_roi = round(((total_revenue - total_cost) / total_cost) * 100, 2) if total_cost > 0 else 0
+                    total_conversion_rate = round((total_conversions / total_clicks) * 100, 2) if total_clicks > 0 else 0
+                    total_cpc = round((total_cost / total_clicks), 2) if total_clicks > 0 else 0
+
+                    output.append({
+                        "id": str(uuid.uuid4()),
+                        "sub_id_6": sub_id_6,
+                        "sub_id_3": sub_id_3,
+                        "total_cost": total_cost,
+                        "total_revenue": total_revenue,
+                        "total_profit": total_profit,
+                        "total_clicks": total_clicks,
+                        "total_cpc": total_cpc,
+                        "total_roi": total_roi,
+                        "total_conversion_rate": total_conversion_rate,
+                        "adset": items
+                    })
+                return output
+
+            output = group_processed_data(processed_data)
+
+            model_path = os.path.join(settings.MEDIA_ROOT, 'dbscan_model_bundle_latest.pkl')
+
+            final_results = []
+            for group in output:  # Your grouped campaign list
+                enriched = enrich_campaign_data(group, model_path=model_path)
+                final_results.append(enriched)
+
+            summary = {}
+            if all_data_items:
+                summary_df = pd.DataFrame(all_data_items)
+                if not summary_df.empty:
+                    total_cost = round(summary_df['cost'].sum(), 2)
+                    total_revenue = round(summary_df['revenue'].sum(), 2)
+                    total_roi = round(((total_revenue - total_cost) / total_cost) * 100, 2) if total_cost > 0 else 0
+
+                    summary = {
+                        "total_adset" : len(summary_df),
+                        "total_cost": round(summary_df['cost'].sum(), 2),
+                        "total_revenue": round(summary_df['revenue'].sum(), 2),
+                        "total_profit": round(summary_df['profit'].sum(), 2),
+                        "total_clicks": int(summary_df['clicks'].sum()),
+                        "total_conversions": int(summary_df['conversions'].sum()),
+                        "total_roi": total_roi,
+                        "average_conversion_rate": round(summary_df['conversion_rate'].mean(), 4),
+                        "priority_distribution": summary_df['priority'].astype(str).value_counts().to_dict()
+                    }
+            else:
+                summary = {}
+
+            return Response({'success': True, 'data': final_results, 'summary': summary}, status=status.HTTP_200_OK)
+
+        except requests.RequestException as e:
+            return Response({'success': False, 'error': f'API request failed: {str(e)}'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        except Exception as e:
+            return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
