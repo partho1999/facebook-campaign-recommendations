@@ -1,6 +1,7 @@
 import requests
 from datetime import datetime, timedelta
 from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
 import pandas as pd
@@ -628,6 +629,7 @@ class PredictCampaignsUpdateView(APIView):
             return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class PredictCampaignsDailyView(APIView):
+    permission_classes = [IsAuthenticated]
     def get(self, request):
         try:
             # API config
@@ -785,6 +787,7 @@ class PredictCampaignsDailyView(APIView):
             return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
 class PredictDateRangeView(APIView):
+    permission_classes = [IsAuthenticated]
     """
     API endpoint to get ad set campaign data within a date range,
     process, save in DB and return grouped result and summary.
