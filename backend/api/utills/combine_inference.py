@@ -232,6 +232,8 @@ def enrich_campaign_data(input_data, model_path=None):
         "total_clicks": input_data.get("total_clicks"),
         "total_cpc": input_data.get("total_cpc"),
         "total_roi": input_data.get("total_roi"),
+        "geo": input_data.get("geo"),
+        "country": input_data.get("country"),
         "total_conversion_rate": input_data.get("total_conversion_rate"),
         "recommendation": majority_rec,
         "recommendation_percentage": recommendation_percentage,
