@@ -888,11 +888,6 @@ class PredictDateRangeView(APIView):
             def extract_geo(sub_id_6):
                 return sub_id_6.split(" - ")[1] if " - " in sub_id_6 else None
 
-            def extract_country_name(geo):
-                if geo == "US":
-                    return "United States"
-                return geo
-
             df["geo"] = df["sub_id_6"].apply(extract_geo)
             df["country"] = df["geo"].apply(extract_country_name)
 
