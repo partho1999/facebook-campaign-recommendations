@@ -949,6 +949,10 @@ class PredictDateRangeView(APIView):
                     total_conversion_rate = round((total_conversions / total_clicks) * 100, 2) if total_clicks > 0 else 0
                     total_cpc = round((total_cost / total_clicks), 2) if total_clicks > 0 else 0
 
+                    # ✅ Pick geo and country from first item in the group
+                    geo = items[0].get("geo")
+                    country = items[0].get("country")
+
                     output.append({
                         "id": str(uuid.uuid4()),
                         "sub_id_6": sub_id_6,
@@ -958,6 +962,8 @@ class PredictDateRangeView(APIView):
                         "total_profit": total_profit,
                         "total_clicks": total_clicks,
                         "total_cpc": total_cpc,
+                        "geo": geo,
+                        "country": country,
                         "total_roi": total_roi,
                         "total_conversion_rate": total_conversion_rate,
                         "adset": items
