@@ -4,7 +4,8 @@ from .views import (
     PredictTimeRangeView, 
     PredictCampaignsUpdateView,
     PredictCampaignsDailyView,
-    PredictDateRangeView
+    PredictDateRangeView,
+    UpdateAdsetStatusAPIView
 ) 
 
 urlpatterns = [
@@ -13,4 +14,5 @@ urlpatterns = [
     path('predictions-combine/', PredictCampaignsUpdateView.as_view(), name='predictions-combine'),
     path('prediction-daily/', PredictCampaignsDailyView.as_view(), name='daily-predict-campaigns'),
     path('predict-date-range/', PredictDateRangeView.as_view(), name='predict-date-range'),
+    path('update-adset-status/', UpdateAdsetStatusAPIView.as_view(), name='update-adset-status'),
 ]

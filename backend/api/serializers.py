@@ -1,5 +1,6 @@
 from rest_framework import serializers
-from .models import Campaign
+from .models import Campaign, AdsetStatus
+
 
 class CampaignSerializer(serializers.ModelSerializer):
     metrics = serializers.SerializerMethodField()
@@ -23,3 +24,9 @@ class CampaignSerializer(serializers.ModelSerializer):
             'cpc': obj.cpc,
             'profit_margin': obj.profit_margin,
         }
+
+
+class AdsetStatusSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AdsetStatus
+        fields = ['adset_id', 'is_active']

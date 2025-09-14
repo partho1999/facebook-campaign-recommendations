@@ -26,6 +26,7 @@ from api.utills.country import extract_country_name
 import uuid
 from api.utills.combine_inference import enrich_campaign_data
 from .models import AdsetStatus
+from .serializers import AdsetStatusSerializer
 
 
 # Global state tracker for cycling state 0-7
@@ -1028,3 +1029,35 @@ class PredictDateRangeView(APIView):
 
         except Exception as e:
             return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class UpdateAdsetStatusAPIView(APIView):
+
+    permission_classes = [IsAuthenticated]
+    """
+    Update the is_active status of an AdsetStatus by adset_id.
+    """
+
+    def post(self, request, *args, **kwargs):
+        adset_id = request.data.get('adset_id')
+        is_active = request.data.get('is_active')
+
+        if adset_id is None or is_active is None:
+            return Response(
+                {"error": "adset_id and is_active are required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            adset = AdsetStatus.objects.get(adset_id=adset_id)
+        except AdsetStatus.DoesNotExist:
+            return Response(
+                {"error": "Adset not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Update the value
+        adset.is_active = is_active
+        adset.save()
+
+        serializer = AdsetStatusSerializer(adset)
+        return Response(serializer.data, status=status.HTTP_200_OK)
