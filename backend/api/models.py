@@ -138,3 +138,11 @@ class AdSetTimeRange(models.Model):
 
     def __str__(self):
         return f"AdSet {self.sub_id_2} | Day: {self.day}"
+
+
+class AdsetStatus(models.Model):
+    adset_id = models.CharField(max_length=100, unique=True)  # no duplicates allowed
+    is_active = models.BooleanField(default=True)
+
+    def __str__(self):
+        return f"{self.adset_id} - {'Active' if self.is_active else 'Paused'}"

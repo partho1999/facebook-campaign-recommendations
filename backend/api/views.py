@@ -25,7 +25,7 @@ import re
 from api.utills.country import extract_country_name
 import uuid
 from api.utills.combine_inference import enrich_campaign_data
-
+from .models import AdsetStatus
 
 
 # Global state tracker for cycling state 0-7
@@ -683,6 +683,16 @@ class PredictCampaignsDailyView(APIView):
             if not rows:
                 return Response({'success': True, 'data': [], 'summary': {}}, status=status.HTTP_200_OK)
 
+            # ✅ Optimized insert
+            adset_ids = {row.get("sub_id_2") for row in rows if row.get("sub_id_2")}
+            if adset_ids:
+                existing_ids = set(
+                    AdsetStatus.objects.filter(adset_id__in=adset_ids).values_list("adset_id", flat=True)
+                )
+                new_ids = adset_ids - existing_ids
+                new_records = [AdsetStatus(adset_id=adset_id, is_active=True) for adset_id in new_ids]
+                AdsetStatus.objects.bulk_create(new_records, ignore_conflicts=True)
+
             df = pd.DataFrame(rows)
 
             df.to_csv("media/row_data.csv", index=False)
@@ -716,6 +726,21 @@ class PredictCampaignsDailyView(APIView):
             data_path =os.path.join(settings.MEDIA_ROOT, 'preprocess_data.json')
 
             data = main(data_path)
+            # print("data:", data)
+
+            # 1. Extract all adset_ids from your data
+            adset_ids = {row['sub_id_2'] for row in data if row.get('sub_id_2')}
+
+            # 2. Query DB once and create a map
+            status_map = {
+                obj.adset_id: 'active' if obj.is_active else 'paused'
+                for obj in AdsetStatus.objects.filter(adset_id__in=adset_ids)
+            }
+
+            # 3. Enrich each row
+            for row in data:
+                adset_id = row.get('sub_id_2')
+                row['status'] = status_map.get(adset_id, 'unknown')  # 'unknown' if not in DB
 
             all_data_items.extend(data)
             grouped = defaultdict(list)
