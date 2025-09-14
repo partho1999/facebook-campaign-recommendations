@@ -32,7 +32,7 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 SECRET_KEY = 'django-insecure-pr=hhob(&5k!ncxy3^#u#u_lnhlefj!^-^2u=of$#@k+%vrd_k'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = False
+DEBUG = True
 
 ALLOWED_HOSTS = ['*']
 
@@ -101,6 +101,13 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:3000",
     "https://campaign-recommendations-fontend.vercel.app",
 ]
+
+CSRF_TRUSTED_ORIGINS = [
+    "https://adrecommend.waywisetech.com"
+]
+
+CSRF_COOKIE_SECURE = True     # only send cookie over HTTPS
+SESSION_COOKIE_SECURE = True  # secure session cookie
 
 # CORS_ALLOW_ALL_ORIGINS = True
 
