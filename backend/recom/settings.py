@@ -100,7 +100,7 @@ DATABASES = {
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "https://campaign-recommendations-fontend.vercel.app",
+    "https://facebook-campaign-recommendations-q7bvlpoiq.vercel.app",
 ]
 
 CSRF_TRUSTED_ORIGINS = [
