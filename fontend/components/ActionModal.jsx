@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { RefreshCw } from "lucide-react";
 
 export default function ActionModal({ initialCount = 1, campaign_id = null, recomendations = null }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -49,10 +50,10 @@ export default function ActionModal({ initialCount = 1, campaign_id = null, reco
   return (
     <>
       <button
-        className="w-full px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 transition text-sm"
+        className="text-xs text-indigo-600 underline hover:text-indigo-800 pr-4"
         onClick={() => setIsOpen(true)}
       >
-        Update
+        <RefreshCw size={24} color="blue" />
       </button>
 
       {isOpen && (

@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button"
 import CampaignAccordion from "@/components/CampaignAccordion";
-import TimeRange from "@/components/TimeRange";
+import CampaignTable from "@/components/ExpendableTable";
+import Navbar from "@/components/NavBar";
 import {
   Accordion,
   AccordionContent,
@@ -40,6 +41,8 @@ import {
   Target,
 } from "lucide-react"
 
+import { getMe, authFetch } from "@/lib/api";
+
 const formatCurrency = (amount) =>
   new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -50,37 +53,7 @@ const formatCurrency = (amount) =>
 const formatPercentage = (value) =>
   `${(value * 100).toFixed(2)}%`
 
-const getRecommendationColor = (rec) => {
-  switch (rec) {
-    case "PAUSE":
-      return "destructive"
-    case "RESTRUCTURE":
-      return "destructive"
-    case "UNDER OBSERVATION":
-      return "secondary"
-    case "MONITOR":
-      return "blue"
-    case "OPTIMIZE":
-      return "green"
-    default:
-      return "default"
-  }
-}
-
-const getRecommendationIcon = (rec) => {
-  switch (rec) {
-    case "PAUSE":
-      return <Pause className="h-4 w-4" />
-    case "UNDER OBSERVATION":
-    case "MONITOR":
-      return <Eye className="h-4 w-4" />
-    case "OPTIMIZE":
-      return <Activity className="h-4 w-4" />
-    default:
-      return <Activity className="h-4 w-4" />
-  }
-}
-
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL;
 
 export default function Page() {
   const [activeTab, setActiveTab] = useState("tab1");
@@ -89,24 +62,38 @@ export default function Page() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [data, setData] = useState([]);
+  const [user, setUser] = useState(null);
 
-  console.log(startDate)
-  console.log(endDate)
 
-  console.log(activeTab)
+  useEffect(() => {
+    const fetchUser = async () => {
+      const user = await getMe();
+      setUser(user);
+    };
+    fetchUser();
+  }, []);
 
-  
   const handleSearch = async () => {
     if (!startDate || !endDate) {
       alert("Please select both start and end dates.");
       return;
     }
 
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    if (start >= end) {
+      alert("Start date must be earlier than end date.");
+      return;
+    }
+
+
     setLoading(true);
     try {
-      const res = await fetch(`https://adrecommend.waywisetech.com/api/predict-time-range/?start_date=${startDate}&end_date=${endDate}`);
+      const res = await authFetch(`${API_BASE_URL}/api/predict-date-range/?start_date=${startDate}&end_date=${endDate}`);
       const result = await res.json();
       if (result.success) {
+        setResponse(result); 
         setData(result.data || []);
       } else {
         console.error("API error:", result.error || "Unknown error");
@@ -122,7 +109,7 @@ export default function Page() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const res = await fetch("https://adrecommend.waywisetech.com/api/prediction-run");
+        const res = await authFetch(`${API_BASE_URL}/api/prediction-daily`);
         const resData = await res.json(); // ✅ Rename here
         setResponse(resData);
         setData(resData.data || []);      // ✅ Use same renamed variable
@@ -144,7 +131,10 @@ export default function Page() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-6 dark:from-slate-900 dark:to-slate-950">
-      <div className="max-w-7xl mx-auto space-y-8">
+      <div className="space-y-8">
+        {!loading && response?.success && (
+          <Navbar />
+        )}
         {/* Loading */}
         {loading && (
           <Card>
@@ -170,6 +160,7 @@ export default function Page() {
         {/* Summary */}
         {!loading && response?.success && Object.keys(summary).length > 0 && (
           <>
+          
           <div className="text-center space-y-2">
             <h1 className="text-4xl font-bold text-gray-900">Ad Recommendation Dashboard</h1>
             <p className="text-gray-600">Monitor and optimize your advertising campaigns</p>
@@ -178,7 +169,7 @@ export default function Page() {
               Refresh Data
             </Button>
           </div>
-          <Card>
+          <Card className="w-full">
             <CardHeader>
               <CardTitle className="text-blue-800">📊 Summary Statistics</CardTitle>
               <CardDescription className="text-gray-500">
@@ -192,7 +183,8 @@ export default function Page() {
                 ["Total Profit/Loss", formatCurrency(summary.total_profit), summary.total_profit >= 0 ? "text-green-600" : "text-red-600"],
                 ["Total Clicks", summary.total_clicks],
                 ["Total Conversions", summary.total_conversions],
-                ["Avg ROI", formatPercentage(summary.average_roi / 100), summary.average_roi >= 0 ? "text-green-600" : "text-red-600"],
+                ["Total Adsets", summary.total_adset],
+                ["Total ROI", formatPercentage(summary.total_roi / 100), summary.total_roi >= 0 ? "text-green-600" : "text-red-600"],
                 ["Avg Conv. Rate", formatPercentage(summary.average_conversion_rate)],
               ].map(([label, value, color], idx) => (
                 <div key={idx}>
@@ -214,20 +206,23 @@ export default function Page() {
           </Card>
           </>
         )}
-        <div className="w-full flex flex-col items-center">
+        <div className="w-full flex flex-col">
           {/* Tabs */}
           {!loading && response?.success && data.length > 0 && (
-            <div role="tablist" className="flex border-b border-gray-200 space-x-4 mb-4">
+            <div role="tablist" className="flex justify-center border-b border-gray-200 space-x-4 mb-4">
               <button
                 role="tab"
-                onClick={() => setActiveTab("tab1")}
+                onClick={() => {
+                  setActiveTab("tab1");
+                  window.location.reload();
+                }}
                 className={`px-4 py-2 text-sm font-medium transition ${
                   activeTab === "tab1"
                     ? "text-blue-600 border-b-2 border-blue-500"
                     : "text-gray-600 hover:text-blue-600 hover:border-b-2 hover:border-blue-500"
                 }`}
               >
-                Live Recomandations
+                Live Recommendations
               </button>
               <button
                 role="tab"
@@ -247,11 +242,15 @@ export default function Page() {
           {!loading && response?.success && data.length > 0 && (
             <div className="mt-4 text-center">
               {activeTab === "tab1" && (
-                <CampaignAccordion data={data} loading={loading} response={response} />
+                <>
+                  <CampaignTable data={data} />
+                  {/* <CampaignAccordion data={data} loading={loading} response={response} /> */}
+                </>
+                
               )}
               {activeTab === "tab2" && (
                 <>
-                  <Card>
+                  <Card className="w-full space-y-4 mb-4">
                     <CardHeader>
                       <CardTitle className="text-indigo-700 text-start">Add Filter</CardTitle>
                       <CardDescription className="text-gray-500 text-start">
@@ -283,7 +282,8 @@ export default function Page() {
                           <div className="shrink-0">
                               <button
                               onClick={handleSearch}
-                              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                              disabled={loading}
+                              className={`px-4 py-2 ${loading ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"} text-white rounded`}
                               >
                               Search
                               </button>
@@ -291,7 +291,8 @@ export default function Page() {
                           </div>
                     </CardContent>
                   </Card>
-                  <CampaignAccordion data={data} loading={loading} response={response} />
+                  <CampaignTable data={data} />
+                  {/* <CampaignAccordion data={data} loading={loading} response={response} /> */}
                 </>
               )}
             </div>

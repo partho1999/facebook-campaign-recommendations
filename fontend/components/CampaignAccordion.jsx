@@ -88,7 +88,6 @@ export default function CampaignAccordion({
   const [selectedAdsetId, setSelectedAdsetId] = useState(null);
   const [hoveredCampaign, setHoveredCampaign] = useState(null);
   const [hoverModalOpen, setHoverModalOpen] = useState(false);
-  const [hoverTimeout, setHoverTimeout] = useState(null);
 
   useEffect(() => {
     if (data?.length > 0) {
@@ -122,7 +121,7 @@ export default function CampaignAccordion({
 
       if (!response.ok) throw new Error(`Failed to pause adset ${subId2}`);
 
-      const result = await response.json();
+      await response.json();
       alert(`Adset ${subId2} paused successfully.`);
     } catch (error) {
       alert(`Failed to pause Adset ${subId2}`);
@@ -177,39 +176,27 @@ export default function CampaignAccordion({
           className="space-y-2"
         >
           {data.map((campaign) => {
-            // Get all adsets from all dates
-            const allAdsets = [];
-            if (campaign.day) {
-              Object.keys(campaign.day).forEach((date) => {
-                if (campaign.day[date]?.adset) {
-                  campaign.day[date].adset.forEach((adset) => {
-                    allAdsets.push({ ...adset, date });
-                  });
-                }
-              });
-            }
-
+            // Filter adsets by recommendation (no date grouping)
             const filteredAdsets = selectedRecommendation
-              ? allAdsets.filter(
-                  (ad) => ad.recommendation === selectedRecommendation
-                )
-              : allAdsets;
+              ? campaign.adset.filter((ad) => ad.recommendation === selectedRecommendation)
+              : campaign.adset;
 
+            // If no adsets after filter, skip campaign
             if (filteredAdsets.length === 0) return null;
 
             return (
               <AccordionItem key={campaign.id} value={campaign.id?.toString()}>
                 <AccordionTrigger className="w-full text-left text-base font-medium text-slate-800 hover:text-indigo-700">
                   <div className="w-full grid grid-cols-3 items-end">
-                    <div className="text-sm text-slate-500 text-left">
+                    <div className="text-xs text-slate-500 text-left">
                       <span>{campaign.sub_id_6}</span>
                     </div>
-                    <div className="text-sm text-slate-500 text-center">
+                    <div className="text-xs text-slate-500 text-center">
                       <span>(ID: {campaign.sub_id_3})</span>
                     </div>
-                    <div className="text-sm text-slate-500 text-right pr-8 ">
+                    <div className="text-xs text-slate-500 text-right pr-8 ">
                       <button
-                        className="text-sm text-indigo-600 underline hover:text-indigo-800 pr-4"
+                        className="text-xs text-indigo-600 underline hover:text-indigo-800 pr-4"
                         onClick={(e) => {
                           e.stopPropagation(); // Prevent accordion toggle
                           setHoveredCampaign(campaign);
@@ -233,138 +220,109 @@ export default function CampaignAccordion({
                     </div>
                   </div>
                 </AccordionTrigger>
+
                 <AccordionContent className="pb-4">
-                  <div className="space-y-4">
-                    {campaign.day && Object.keys(campaign.day).map((date) => {
-                      const dateAdsets = campaign.day[date]?.adset || [];
-                      const filteredDateAdsets = selectedRecommendation
-                        ? dateAdsets.filter(
-                            (ad) => ad.recommendation === selectedRecommendation
-                          )
-                        : dateAdsets;
-
-                      if (filteredDateAdsets.length === 0) return null;
-
-                      return (
-                        <div key={date} className="border rounded-lg overflow-auto">
-                          <div className="bg-slate-50 px-4 py-2 border-b">
-                            <span className="text-sm font-medium text-slate-700">
-                              Date: {date}
-                            </span>
-                          </div>
-                          <Table>
-                            <TableHeader>
-                              <TableRow className="bg-slate-100">
-                                <TableHead>Adset</TableHead>
-                                <TableHead>Campaign</TableHead>
-                                <TableHead>Recommendation</TableHead>
-                                <TableHead>Reason</TableHead>
-                                <TableHead>Suggestions</TableHead>
-                                <TableHead>Cost</TableHead>
-                                <TableHead>Revenue</TableHead>
-                                <TableHead>Profit</TableHead>
-                                <TableHead>Clicks</TableHead>
-                                <TableHead>CPC</TableHead>
-                                <TableHead>GEO</TableHead>
-                                <TableHead>Country</TableHead>
-                                <TableHead>CPC Rate</TableHead>
-                                <TableHead>Conv. Rate</TableHead>
-                                <TableHead>ROI</TableHead>
-                                <TableHead>Priority</TableHead>
-                                <TableHead>Action</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {filteredDateAdsets.map((ad) => (
-                                <TableRow key={ad.sub_id_2}>
-                                  <TableCell className="whitespace-normal break-words">
-                                    {ad.sub_id_5}
-                                  </TableCell>
-                                  <TableCell
-                                    className="whitespace-normal break-words"
-                                    title={ad.sub_id_6}
-                                  >
-                                    {ad.sub_id_6}
-                                  </TableCell>
-                                  <TableCell>
-                                    <Badge
-                                      variant={getRecommendationColor(
-                                        ad.recommendation
-                                      )}
-                                      className="flex items-center gap-1 w-fit capitalize"
-                                    >
-                                      {getRecommendationIcon(ad.recommendation)}
-                                      {ad.recommendation}
-                                    </Badge>
-                                  </TableCell>
-                                  <TableCell
-                                    className="whitespace-normal break-words"
-                                    title={ad.reason}
-                                  >
-                                    {ad.reason}
-                                  </TableCell>
-                                  <TableCell
-                                    className="whitespace-normal break-words"
-                                    title={ad.suggestion}
-                                  >
-                                    {ad.suggestion}
-                                  </TableCell>
-                                  <TableCell>{formatCurrency(ad.cost)}</TableCell>
-                                  <TableCell>{formatCurrency(ad.revenue)}</TableCell>
-                                  <TableCell
-                                    className={
-                                      ad.profit >= 0
-                                        ? "text-green-600"
-                                        : "text-red-600"
-                                    }
-                                  >
-                                    {formatCurrency(ad.profit)}
-                                  </TableCell>
-                                  <TableCell>{ad.clicks}</TableCell>
-                                  <TableCell>{ad.cpc}</TableCell>
-                                  <TableCell>{ad.geo}</TableCell>
-                                  <TableCell>{ad.country}</TableCell>
-                                  <TableCell>
-                                    <Badge
-                                      variant={getCpcRateColor(ad.cpc_rate)}
-                                      className="flex items-center gap-1 w-fit capitalize"
-                                    >
-                                      {ad.cpc_rate}
-                                    </Badge>
-                                  </TableCell>
-                                  <TableCell>
-                                    {formatPercentage(ad.conversion_rate)}
-                                  </TableCell>
-                                  <TableCell
-                                    className={
-                                      ad.roi_confirmed >= 0
-                                        ? "text-green-600"
-                                        : "text-red-600"
-                                    }
-                                  >
-                                    {formatPercentage(ad.roi_confirmed / 100)}
-                                  </TableCell>
-                                  <TableCell>{ad.priority}</TableCell>
-                                  <TableCell>
-                                    {ad.recommendation === "PAUSE" ? (
-                                      <button
-                                        onClick={() => {
-                                          setSelectedAdsetId(ad.sub_id_2);
-                                          setShowConfirmModal(true);
-                                        }}
-                                        className="bg-destructive text-white px-2 py-1 rounded hover:bg-destructive/80 text-sm"
-                                      >
-                                        PAUSE
-                                      </button>
-                                    ) : null}
-                                  </TableCell>
-                                </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
-                        </div>
-                      );
-                    })}
+                  <div className="border rounded-lg overflow-x-auto *:scrollbar-hide">
+                    <Table className="scrollbar-hide">
+                      <TableHeader>
+                        <TableRow className="bg-slate-100 text-xs">
+                          <TableHead className="whitespace-nowrap">Adset</TableHead>
+                          <TableHead className="whitespace-nowrap">Campaign</TableHead>
+                          <TableHead className="whitespace-nowrap">Recommendation</TableHead>
+                          <TableHead className="whitespace-nowrap">Reason</TableHead>
+                          <TableHead className="whitespace-nowrap">Suggestions</TableHead>
+                          <TableHead className="whitespace-nowrap">Cost</TableHead>
+                          <TableHead className="whitespace-nowrap">Revenue</TableHead>
+                          <TableHead className="whitespace-nowrap">Profit</TableHead>
+                          <TableHead className="whitespace-nowrap">Clicks</TableHead>
+                          <TableHead className="whitespace-nowrap">CPC</TableHead>
+                          <TableHead className="whitespace-nowrap">GEO</TableHead>
+                          <TableHead className="whitespace-nowrap">Country</TableHead>
+                          <TableHead className="whitespace-nowrap">CPC Rate</TableHead>
+                          <TableHead className="whitespace-nowrap">Conv. Rate</TableHead>
+                          <TableHead className="whitespace-nowrap">ROI</TableHead>
+                          <TableHead className="whitespace-nowrap">Priority</TableHead>
+                          <TableHead className="whitespace-nowrap">Action</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody className="*:text-xs *:whitespace-nowrap *:text-start">
+                        {filteredAdsets.map((ad) => (
+                          <TableRow key={ad.sub_id_2} className="*:px-4 *:py-3">
+                            <TableCell className="">
+                              {ad.sub_id_5}
+                            </TableCell>
+                            <TableCell
+                              className=""
+                              title={ad.sub_id_6}
+                            >
+                              {ad.sub_id_6}
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant={getRecommendationColor(ad.recommendation)}
+                                className="flex items-center gap-1 w-fit capitalize"
+                              >
+                                {getRecommendationIcon(ad.recommendation)}
+                                {ad.recommendation}
+                              </Badge>
+                            </TableCell>
+                            <TableCell
+                              className=""
+                              title={ad.reason}
+                            >
+                              {ad.reason}
+                            </TableCell>
+                            <TableCell
+                              className=""
+                              title={ad.suggestion}
+                            >
+                              {ad.suggestion}
+                            </TableCell>
+                            <TableCell>{formatCurrency(ad.cost)}</TableCell>
+                            <TableCell>{formatCurrency(ad.revenue)}</TableCell>
+                            <TableCell
+                              className={ad.profit >= 0 ? "text-green-600" : "text-red-600"}
+                            >
+                              {formatCurrency(ad.profit)}
+                            </TableCell>
+                            <TableCell>{ad.clicks}</TableCell>
+                            <TableCell>{ad.cpc.toFixed(2)}</TableCell>
+                            <TableCell>{ad.geo}</TableCell>
+                            <TableCell>{ad.country}</TableCell>
+                            <TableCell>
+                              <Badge
+                                variant={getCpcRateColor(ad.cpc_rate)}
+                                className="flex items-center gap-1 p-0.5 text-[10px] w-fit capitalize"
+                              >
+                                {ad.cpc_rate}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>{formatPercentage(ad.conversion_rate)}</TableCell>
+                            <TableCell
+                              className={
+                                ad.roi_confirmed >= 0 ? "text-green-600" : "text-red-600"
+                              }
+                            >
+                              {formatPercentage(ad.roi_confirmed / 100)}
+                            </TableCell>
+                            <TableCell>{ad.priority}</TableCell>
+                            <TableCell>
+                              
+                              <button
+                                onClick={() => {
+                                  setSelectedAdsetId(ad.sub_id_2);
+                                  setShowConfirmModal(true);
+                                }}
+                                className="text-destructive"
+                              >
+                                <Pause className="h-4 w-4" />
+                              </button>
+                              
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
                   </div>
                 </AccordionContent>
               </AccordionItem>
@@ -436,17 +394,11 @@ export default function CampaignAccordion({
                   <TableCell className="whitespace-normal break-words">
                     {hoveredCampaign.sub_id_3 || "N/A"}
                   </TableCell>
-                  <TableCell>
-                    {formatCurrency(hoveredCampaign.total_cost)}
-                  </TableCell>
-                  <TableCell>
-                    {formatCurrency(hoveredCampaign.total_revenue)}
-                  </TableCell>
+                  <TableCell>{formatCurrency(hoveredCampaign.total_cost)}</TableCell>
+                  <TableCell>{formatCurrency(hoveredCampaign.total_revenue)}</TableCell>
                   <TableCell
                     className={
-                      hoveredCampaign.total_profit >= 0
-                        ? "text-green-600"
-                        : "text-red-600"
+                      hoveredCampaign.total_profit >= 0 ? "text-green-600" : "text-red-600"
                     }
                   >
                     {formatCurrency(hoveredCampaign.total_profit)}
@@ -469,9 +421,7 @@ export default function CampaignAccordion({
                   </TableCell>
                   <TableCell>
                     <Badge
-                      variant={getRecommendationColor(
-                        hoveredCampaign.recommendation
-                      )}
+                      variant={getRecommendationColor(hoveredCampaign.recommendation)}
                       className="flex items-center gap-1 w-fit capitalize"
                     >
                       {getRecommendationIcon(hoveredCampaign.recommendation)}

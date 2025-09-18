@@ -1,8 +1,0 @@
-version: "3.9"
-
-services:
-  frontend:
-    build: .
-    container_name: ad_frontend
-    ports:
-      - "3000:80"

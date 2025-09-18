@@ -3,8 +3,8 @@ import { GeistMono } from 'geist/font/mono'
 import './globals.css'
 
 export const metadata = {
-  title: 'v0 App',
-  description: 'Created with v0',
+  title: 'Recom',
+  description: 'Ad Recommendation Dashboard',
   generator: 'v0.dev',
 }
 
@@ -21,6 +21,11 @@ html {
     <html lang="en">
       <head>
         <style dangerouslySetInnerHTML={{ __html: css }} />
+        {/* Favicon */}
+        <link rel="icon" href="/favicon.ico" sizes="any" />
+        {/* Optional PNG or SVG support */}
+        <link rel="icon" href="/favicon.png" type="image/png" />
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
       </head>
       <body>{children}</body>
     </html>
