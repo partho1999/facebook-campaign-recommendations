@@ -212,7 +212,6 @@ class PredictCampaignsView(APIView):
         except Exception as e:
             return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         
-
 class PredictTimeRangeView(APIView):
     """
     API endpoint to get ad set campaign data within a date range,
@@ -465,7 +464,6 @@ class PredictTimeRangeView(APIView):
 
         except Exception as e:
             return Response({'success': False, 'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 class PredictCampaignsUpdateView(APIView):
    def get(self, request):
@@ -742,6 +740,8 @@ class PredictCampaignsDailyView(APIView):
             for row in data:
                 adset_id = row.get('sub_id_2')
                 row['status'] = status_map.get(adset_id, 'unknown')  # 'unknown' if not in DB
+
+            data = [row for row in data if row.get('status') == 'active']
 
             all_data_items.extend(data)
             grouped = defaultdict(list)
