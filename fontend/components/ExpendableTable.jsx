@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useOptimistic } from "react";
 import {
   Card,
   CardHeader,
@@ -18,39 +18,70 @@ import { Pause } from "lucide-react";
 import ConfirmModal from "@/components/ConfirmModal";
 import ActionModal from "@/components/ActionModal";
 import { updateAdsetStatus } from "@/lib/api";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-const ExpendableTable = ({ data }) => {
+const ExpendableTable = ({ data, onAdsetPaused }) => {
   const [selectedRecommendation, setSelectedRecommendation] = useState("");
   const [expandedRows, setExpandedRows] = useState([]);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [selectedAdsetId, setSelectedAdsetId] = useState(null);
   const [sortConfig, setSortConfig] = useState({ key: null, direction: "asc" });
   const [adsetSortConfig, setAdsetSortConfig] = useState({});
-  const [pausedAdsets, setPausedAdsets] = useState({}); // ✅ track paused state per adset
+  const queryClient = useQueryClient();
 
-  const handlePauseAction = async (subId2) => {
-    try {
-      const response = await fetch(
-        `https://app.wijte.me/api/adset/pause/${subId2}`,
-        { method: "POST", headers: { "Content-Type": "application/json" } }
-      );
-      if (!response.ok) throw new Error(`Failed to pause adset ${subId2}`);
-      await response.json();
-      alert(`Adset ${subId2} paused successfully.`);
+  // Use optimistic updates for instant UI feedback
+  const [optimisticData, setOptimisticData] = useOptimistic(
+    data,
+    (currentData, optimisticUpdate) => {
+      if (optimisticUpdate.type === "PAUSE_ADSET") {
+        return currentData
+          .map((campaign) => ({
+            ...campaign,
+            adset: campaign.adset.filter(
+              (adset) => adset.sub_id_2 !== optimisticUpdate.adsetId
+            ),
+          }))
+          .filter((campaign) => campaign.adset.length > 0); // Remove campaigns with no adsets
+      }
+      return currentData;
+    }
+  );
 
-      try {
-        const updatedAdset = await updateAdsetStatus(subId2, false);
-        console.log("Adset updated:", updatedAdset);
-      } catch (error) {
-        console.error(error);
-        console.log("Failed to update adset status");
+  // Pause adset mutation
+  const pauseAdsetMutation = useMutation({
+    mutationFn: async (adsetId) => {
+      const [pauseResponse] = await Promise.all([
+        fetch(`https://app.wijte.me/api/adset/pause/${adsetId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        }),
+        updateAdsetStatus(adsetId, false).catch(() => null), // Don't fail on status update error
+      ]);
+
+      if (!pauseResponse.ok) {
+        throw new Error(`Failed to pause adset ${adsetId}`);
       }
 
-      // ✅ mark only this adset as paused
-      setPausedAdsets((prev) => ({ ...prev, [subId2]: true }));
-    } catch (error) {
-      alert(`Failed to pause Adset ${subId2}`);
-    }
+      return pauseResponse.json();
+    },
+    onSuccess: () => {
+      // Simply invalidate and refetch predictions data
+      queryClient.invalidateQueries({
+        queryKey: ["predictions-daily"],
+      });
+    },
+    onError: (error) => {
+      console.warn("Pause operation failed:", error);
+      // Optimistic update will be reverted when query refetches
+    },
+  });
+
+  const handlePauseAction = (subId2) => {
+    // Immediately update UI optimistically - row disappears instantly
+    setOptimisticData({ type: "PAUSE_ADSET", adsetId: subId2 });
+
+    // Trigger the mutation in background
+    pauseAdsetMutation.mutate(subId2);
   };
 
   const handleExpand = (campaignId) => {
@@ -123,8 +154,8 @@ const ExpendableTable = ({ data }) => {
     return "text-gray-700";
   };
 
-  // Filter campaigns by recommendation
-  const filteredData = data.filter((campaign) => {
+  // Filter campaigns by recommendation using optimistic data
+  const filteredData = optimisticData.filter((campaign) => {
     if (!selectedRecommendation) return true;
     return campaign.recommendation === selectedRecommendation;
   });
@@ -163,7 +194,9 @@ const ExpendableTable = ({ data }) => {
           </span>
           {campaign.sub_id_6}
         </TableCell>
-        <TableCell className="px-2 py-1 text-left">{campaign.sub_id_3}</TableCell>
+        <TableCell className="px-2 py-1 text-left">
+          {campaign.sub_id_3}
+        </TableCell>
         <TableCell className="px-2 py-1 text-left">
           {campaign.total_cost.toFixed(2)}
         </TableCell>
@@ -173,12 +206,16 @@ const ExpendableTable = ({ data }) => {
         <TableCell className="px-2 py-1 text-left">
           {campaign.total_profit.toFixed(2)}
         </TableCell>
-        <TableCell className="px-2 py-1 text-left">{campaign.total_clicks}</TableCell>
+        <TableCell className="px-2 py-1 text-left">
+          {campaign.total_clicks}
+        </TableCell>
         <TableCell className="px-2 py-1 text-left">
           {campaign.total_cpc.toFixed(2)}
         </TableCell>
         <TableCell className="px-2 py-1 text-left">{campaign.geo}</TableCell>
-        <TableCell className="px-2 py-1 text-left">{campaign.country}</TableCell>
+        <TableCell className="px-2 py-1 text-left">
+          {campaign.country}
+        </TableCell>
         <TableCell
           className={`px-2 py-1 text-left font-semibold ${getROIColor(
             campaign.total_roi
@@ -275,8 +312,7 @@ const ExpendableTable = ({ data }) => {
       }
 
       adsets.forEach((ad) => {
-        const isDisabled =
-          pausedAdsets[ad.sub_id_2] || ad.status.toLowerCase() === "paused";
+        const isDisabled = ad.status.toLowerCase() === "paused";
 
         rows.push(
           <TableRow
@@ -292,7 +328,9 @@ const ExpendableTable = ({ data }) => {
               {ad.recommendation}
             </TableCell>
             <TableCell className="px-2 py-1 text-left">{ad.reason}</TableCell>
-            <TableCell className="px-2 py-1 text-left">{ad.suggestion}</TableCell>
+            <TableCell className="px-2 py-1 text-left">
+              {ad.suggestion}
+            </TableCell>
             <TableCell className="px-2 py-1 text-left">
               {ad.cost.toFixed(2)}
             </TableCell>
@@ -327,11 +365,11 @@ const ExpendableTable = ({ data }) => {
             </TableCell>
             <TableCell className="px-2 py-1 text-left">{ad.priority}</TableCell>
             <TableCell
-              className={`px-2 py-1 text-left font-semibold ${
-                getStatusColor(pausedAdsets[ad.sub_id_2] ? "paused" : ad.status)
-              }`}
+              className={`px-2 py-1 text-left font-semibold ${getStatusColor(
+                ad.status
+              )}`}
             >
-              {pausedAdsets[ad.sub_id_2] ? "Paused" : ad.status}
+              {ad.status}
             </TableCell>
             <TableCell className="px-2 py-1 text-left">
               <button
@@ -395,7 +433,7 @@ const ExpendableTable = ({ data }) => {
           ))}
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto" style={{ scrollBehavior: "smooth" }}>
           <Table className="min-w-full border border-gray-200 text-sm">
             <TableHeader className="bg-gray-100">
               <TableRow>
@@ -430,7 +468,9 @@ const ExpendableTable = ({ data }) => {
                 ))}
               </TableRow>
             </TableHeader>
-            <TableBody>{sortedData.map((campaign) => getRows(campaign))}</TableBody>
+            <TableBody>
+              {sortedData.map((campaign) => getRows(campaign))}
+            </TableBody>
           </Table>
         </div>
       </CardContent>
